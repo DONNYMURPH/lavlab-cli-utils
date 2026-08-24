@@ -1,0 +1,16 @@
+# Build-time dependencies only. These are not installed with the published wheel.
+Nuitka>=2.0
+numpy
+pyvips[binary]
+tifffile
+scikit-image
+PyYAML
+tqdm
+omero-py
+highdicom
+nibabel
+SimpleITK
+pydicom
+
+# Install the Glencoe/ZeroC Ice wheel separately before building, using the
+# lab's approved direct URL for the target architecture.

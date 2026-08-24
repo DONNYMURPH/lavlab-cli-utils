@@ -1,0 +1,65 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+    "Nuitka>=2.0",
+    "numpy",
+    "pyvips",
+    "tifffile",
+    "scikit-image",
+    "PyYAML",
+    "tqdm",
+    "omero-py",
+    "highdicom",
+    "nibabel",
+    "SimpleITK",
+    "pydicom",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lavlab-cli-utils"
+version = "0.1.0"
+description = "LAVLab CLI utilities for pulling large recons and ROI masks from OMERO, moving QuPath GeoJSON annotations in and out of OMERO, and converting between DICOM SEG and NIfTI."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+# Everything needed to run `python -m lavlab ...` from a source checkout,
+# without waiting on a Nuitka build. Mirrors build-requirements.txt.
+dev = [
+    "numpy",
+    "pyvips",
+    "tifffile",
+    "scikit-image",
+    "PyYAML",
+    "tqdm",
+    "omero-py",
+    "highdicom",
+    "nibabel",
+    "SimpleITK",
+    "pydicom",
+    "pydicom-seg",
+    "pytest",
+]
+
+[project.scripts]
+lavlab = "lavlab.launcher:main"
+
+[tool.setuptools.packages.find]
+include = ["lavlab*"]
+
+[tool.setuptools.package-data]
+lavlab = ["data/*.yaml", "data/*.json", "bin/lavlab-bin"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-win* *-musllinux*"
+
+[[tool.cibuildwheel.overrides]]
+select = "cp*-manylinux_x86_64"
+environment = { LAVLAB_TARGET = "linux-x86_64" }
+
+[[tool.cibuildwheel.overrides]]
+select = "cp*-macosx_arm64"
+environment = { LAVLAB_TARGET = "macos-arm64" }

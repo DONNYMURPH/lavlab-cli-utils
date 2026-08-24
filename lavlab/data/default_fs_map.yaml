@@ -1,0 +1,19 @@
+# Default fs_map for the lab's storage layout.
+#
+# This is a "nice to have" default approximating our historical directory
+# convention; the exact regex/paths can be tuned later or overridden
+# entirely with --fs-map /path/to/custom.yaml.
+#
+# Format:
+#   ${GROUP_ID}:
+#     name: "${GROUP_NAME}"
+#     maps:
+#       - match: "${CAPTURE_REGEX}"        # applied to the image name
+#         base_dir: "/..."                 # must exist, or the whole run fails
+#         formatted_dir: "${name}/..."     # ${name} refers to a named regex group
+1:
+  name: "Prostate"
+  maps:
+    - match: '^N(?P<subject>\d+)_S(?P<slide>\d+)(?P<deeper>_Deeper\d*)?_(?P<stain>\w+)\.ome\.tiff$'
+      base_dir: "/Volumes/Siren/Prostate_data"
+      formatted_dir: "${subject}/Hist/${slide}${deeper}/Huron/${stain}"

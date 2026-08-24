@@ -1,0 +1,62 @@
+"""Shared helpers for the ``lr`` and ``roi`` command groups."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+
+from lavlab.config import ConfigError, load_fs_map, resolve_creds
+from lavlab.omero_client import connect, switch_to_object_group
+
+log = logging.getLogger(__name__)
+
+
+def add_creds_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("-u", "--user", help="OMERO username (or set OMERO_USER).")
+    parser.add_argument("-w", "--password", help="OMERO password (or set OMERO_PASSWORD).")
+    parser.add_argument("-s", "--host", help="OMERO server host (or set OMERO_HOST).")
+    parser.add_argument("-p", "--port", type=int, help="OMERO server port (or set OMERO_PORT).")
+
+
+def add_common_output_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--downsample", type=int, default=10, help="Downsample factor (default: 10).")
+    parser.add_argument("--fs-map", dest="fs_map", help="Path to a custom fs_map YAML file.")
+
+
+def connect_from_args(args: argparse.Namespace):
+    try:
+        creds = resolve_creds(args.user, args.password, args.host, args.port)
+    except ConfigError as exc:
+        raise SystemExit(f"error: {exc}")
+    return connect(creds)
+
+
+def load_fs_map_from_args(args: argparse.Namespace):
+    try:
+        return load_fs_map(args.fs_map)
+    except ConfigError as exc:
+        raise SystemExit(f"error: {exc}")
+
+
+def parse_target(target: str) -> int | str:
+    """Return the image id as an int, or 'batch' verbatim."""
+    if target == "batch":
+        return "batch"
+    try:
+        return int(target)
+    except ValueError:
+        raise SystemExit(
+            f"error: expected an image ID or 'batch', got '{target}'"
+        )
+
+
+def group_of(conn, obj) -> int:
+    switch_to_object_group(conn, obj)
+    return obj.details.group.id.val
+
+
+def ensure_parent_dir(path: str) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
