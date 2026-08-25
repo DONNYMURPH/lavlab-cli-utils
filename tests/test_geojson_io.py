@@ -108,3 +108,4 @@ def test_load_features_accepts_feature_collection(tmp_path):
     )
     features = load_features(path)
     assert len(features) == 1
+    

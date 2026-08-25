@@ -10,7 +10,7 @@ from pathlib import Path
 from setuptools import setup
 from setuptools.command.build_py import build_py as _build_py
 
-from build_native import omero_ice_modules
+from build_native import PYDICOM_NUITKA_FLAGS, omero_ice_modules
 
 
 class build_py(_build_py):
@@ -31,6 +31,7 @@ class build_py(_build_py):
             "--output-filename=lavlab-bin",
             "--include-package=lavlab",
             "--include-package-data=lavlab",
+            *PYDICOM_NUITKA_FLAGS,
             str(Path(__file__).parent / "lavlab" / "__main__.py"),
         ]
         command[3:3] = [f"--include-module={name}" for name in omero_ice_modules()]

@@ -125,8 +125,7 @@ def _pairs_from_map(map_path: str) -> list[tuple]:
     """Read an explicit CSV of ``geojson_path,image_id`` rows.
 
     A header row is optional and detected automatically; ``#`` starts a
-    comment. This is the mode to use for a real restore, because the mapping
-    is reviewable beforehand and auditable afterwards.
+    comment.
 
     :param map_path: the CSV to read
     :type map_path: str

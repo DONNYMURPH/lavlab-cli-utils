@@ -1,10 +1,4 @@
-"""Generic image loading/downsampling for OMERO-managed image files on disk.
-
-Adapted from the lab's ad-hoc large-recon script. Uses tifffile to read
-pyramid levels directly so tiled separate-plane OME-TIFFs (which pyvips can't
-load) are handled correctly, with pyvips/openslide fallbacks for anything
-tifffile can't parse as a series.
-"""
+"""Generic image loading/downsampling for OMERO-managed image files on disk."""
 
 from __future__ import annotations
 
@@ -49,10 +43,6 @@ def load_downsampled(src_path: str, downsample: int) -> pv.Image:
 
         arr = series.levels[best_idx].asarray()
 
-    # Normalise arr to (H, W) or (H, W, C) for pyvips: drop singleton/unwanted
-    # axes (T, Z, ...) from highest index to lowest so earlier indices aren't
-    # disturbed. 'S' is the RGB sample axis used by brightfield WSI scanners;
-    # treat it like 'C' so it's kept rather than collapsed to a single plane.
     drop = sorted(
         [i for i, a in enumerate(axes) if a not in ("Y", "X", "C", "S")],
         reverse=True,

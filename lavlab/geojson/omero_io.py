@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 """
-The parts that talk to OMERO.
+Uses Omero not just Python.
 
 ``omero`` is imported lazily inside each function so the rest of the package
 -- and its tests -- work on a machine without ``omero-py`` installed. That is
@@ -13,8 +13,7 @@ only reads. ROIs are rows in OMERO's database, not something written into the
 image file.
 
 Connecting to OMERO is not this module's job -- callers get a connection
-from :func:`lavlab.omero_client.connect` (the same helper ``lr``/``roi``/
-``meta`` use) and pass it in already open.
+from `lavlab.omero_client.connect`.
 """
 
 from __future__ import annotations
@@ -43,10 +42,8 @@ from lavlab.geojson.geometry import (
     rgb_to_omero_color,
 )
 
-#: ROIs saved per server round trip.
 SAVE_BATCH = 50
 
-#: OMERO shape classes with no GeoJSON equivalent.
 UNSUPPORTED_SHAPES = ("MaskI", "LabelI", "LineI")
 
 
@@ -97,11 +94,6 @@ def safe_filename(name: str) -> str:
     return cleaned or "image"
 
 
-# --------------------------------------------------------------------------
-# writing
-# --------------------------------------------------------------------------
-
-
 def build_roi(
     image_id: int,
     annotation: Annotation,
@@ -113,10 +105,6 @@ def build_roi(
     The class name goes to ``Shape.textValue`` and ``Roi.name``, the colour to
     ``strokeColor`` and a translucent ``fillColor``, and the QuPath UUID to
     ``Roi.description``.
-
-    ``theZ`` and ``theT`` are deliberately left unset, which means the shape
-    shows on every plane. That is right for single-plane slides; a z-stack
-    would need them set explicitly.
 
     :param image_id: target image
     :type image_id: int
@@ -194,9 +182,6 @@ def import_annotations(
     image = conn.getObject("Image", image_id)
     if image is None:
         raise LookupError(f"image {image_id} not found, or you cannot read it")
-
-    # An image can live in a group other than the user's default; without
-    # this the save fails with a confusing security error.
     conn.SERVICE_OPTS.setOmeroGroup(image.getDetails().getGroup().getId())
     update = conn.getUpdateService()
 
@@ -212,11 +197,6 @@ def import_annotations(
         update.saveAndReturnArray(batch, conn.SERVICE_OPTS)
         result.created += len(batch)
     return result
-
-
-# --------------------------------------------------------------------------
-# reading
-# --------------------------------------------------------------------------
 
 
 def read_shape(shape, ellipse_segments: int, warnings: list[str]) -> ShapeSpec | None:
@@ -322,19 +302,10 @@ def export_image(
     return result
 
 
-# --------------------------------------------------------------------------
-# working out which file belongs to which image
-# --------------------------------------------------------------------------
-
-
 def match_by_name(
     conn, dataset_id: int, paths: list[Path]
 ) -> tuple[list[tuple], list[str]]:
     """Match GeoJSON files to images in a dataset by filename stem.
-
-    ``TCGA-01.geojson`` matches an image named ``TCGA-01.svs``. A stem that
-    matches no image, or more than one, is reported rather than guessed at:
-    putting annotations on the wrong slide is worse than not placing them.
 
     :param conn: a connected gateway
     :param dataset_id: the dataset to search

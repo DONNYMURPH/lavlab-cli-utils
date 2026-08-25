@@ -39,7 +39,6 @@ dev = [
     "nibabel",
     "SimpleITK",
     "pydicom",
-    "pydicom-seg",
     "pytest",
 ]
 

@@ -23,4 +23,22 @@ env/
 .vscode/
 .idea/
 .DS_Store
-.claude/
+
+# legacy/ holds superseded scripts and notebooks kept for reference only.
+# Some notebook outputs in there contain real OMERO usernames/hostnames
+# from having actually been run against the lab server -- never commit it.
+/legacy/
+
+# The Ice wheel goes here for Docker builds (see Dockerfile) -- it's a
+# large binary from a lab-internal URL, not something to commit.
+vendor/*.whl
+
+# Secrets -- never commit these
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+omero_user.txt
+secrets*.yaml
+secrets*.yml

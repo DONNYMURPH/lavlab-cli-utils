@@ -38,11 +38,6 @@ def _default_seg_template_path() -> Path:
     return Path(resources.files("lavlab.data").joinpath("default_seg_template.json"))
 
 
-# --------------------------------------------------------------------------
-# DICOM SEG -> NIfTI
-# --------------------------------------------------------------------------
-
-
 def format_output_path(output_dir: str, nii_name: str, seg_name: str) -> str:
     """Format the output path for one segment's NIfTI file.
 
@@ -159,12 +154,6 @@ def split_seg_channels(
 ) -> Generator[tuple[int, np.ndarray], None, None]:
     """Split a DICOM SEG object into one array per segment.
 
-    Iterates ``seg_data.segment_numbers`` rather than
-    ``range(seg_data.number_of_segments)`` -- for a LABELMAP-type
-    segmentation (as written by :func:`nifti_to_dcmseg`), highdicom's
-    ``number_of_segments`` is unreliable (observed to read 0 even with real
-    segments present), while ``segment_numbers`` is not.
-
     :param seg_data: the DICOM SEG object
     :type seg_data: highdicom.seg.Segmentation
     :return: ``(segment_number, pixel_array)`` pairs, in segment order
@@ -185,9 +174,6 @@ def split_seg_channels(
 
 def copy_sitk_image_info(src: sitk.Image, dst: sitk.Image) -> sitk.Image:
     """Copy spacing/origin/direction/metadata from one image to another.
-
-    Dimensions can differ between ``src`` and ``dst``, which is why this
-    can't just be ``dst.CopyInformation(src)``.
 
     :param src: the image to copy from
     :type src: sitk.Image
@@ -229,10 +215,6 @@ def dcmseg_to_nifti(dicom_seg_path: str, nii_path: str, output_dir: str) -> list
     try:
         sitk_dcm_seg = sitk.ReadImage(dicom_seg_path)
     except RuntimeError:
-        # SimpleITK/GDCM cannot yet parse the newer LABELMAP-type multiframe
-        # SEG (the type lavlab.seg.nifti_to_dcmseg writes). The segmentation
-        # shares physical space with the reference series it was drawn
-        # against, so the reference NIfTI's geometry is equivalent.
         log.info(
             "SimpleITK could not read geometry directly from %s "
             "(expected for LABELMAP-type SEGs); using the reference "
@@ -268,11 +250,6 @@ def dcmseg_to_nifti(dicom_seg_path: str, nii_path: str, output_dir: str) -> list
         out_paths.append(channel_output_path)
 
     return out_paths
-
-
-# --------------------------------------------------------------------------
-# NIfTI -> DICOM SEG
-# --------------------------------------------------------------------------
 
 
 def _load_segment_descriptions(
@@ -352,12 +329,6 @@ def nifti_to_dcmseg(
 ) -> str:
     """Write a NIfTI label mask out as a DICOM SEG object.
 
-    The NIfTI mask carries no patient/study/geometry metadata of its own, so
-    a reference DICOM series (the images the segmentation was drawn against)
-    supplies it. The mask is written as a single ``LABELMAP``-type
-    segmentation, matching a multi-class label array (0 = background, each
-    other integer value one segment) one frame per reference-series slice.
-
     :param nifti_mask_path: path to the NIfTI label mask
     :type nifti_mask_path: str
     :param reference_dicom_dir: directory of ``.dcm`` files the mask was drawn against
@@ -399,7 +370,6 @@ def nifti_to_dcmseg(
     segmentation = sitk.ReadImage(str(mask_path))
     segmentation = sitk.Cast(segmentation, sitk.sitkUInt8)
     mask_array = sitk.GetArrayFromImage(segmentation)  # (z, y, x)
-
     source_images = _read_series_in_slice_order(dicom_series_paths)
     if len(source_images) != mask_array.shape[0]:
         raise ValueError(

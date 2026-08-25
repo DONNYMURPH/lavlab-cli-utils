@@ -5,9 +5,7 @@
 Geometry helpers shared by the import and export paths.
 
 Nothing here imports ``omero``, so all of it can be exercised without a
-server. The two interesting pieces are :func:`bridge_hole` and
-:func:`unbridge_ring`, which work around OMERO's polygon model having no
-concept of an interior ring.
+server.
 """
 
 from __future__ import annotations
@@ -19,11 +17,6 @@ MIN_RING_POINTS = 3
 
 Point = "list[float]"
 Ring = "list[list[float]]"
-
-
-# --------------------------------------------------------------------------
-# colour
-# --------------------------------------------------------------------------
 
 
 def rgb_to_omero_color(r: int, g: int, b: int, alpha: int = 255) -> int:
@@ -78,19 +71,8 @@ def qupath_colorrgb_to_rgb(packed: int) -> tuple[int, int, int]:
     return ((packed >> 16) & 255, (packed >> 8) & 255, packed & 255)
 
 
-# --------------------------------------------------------------------------
-# points strings
-# --------------------------------------------------------------------------
-
-
 def format_coord(value: float, ndigits: int = 2) -> str:
     """Format a single coordinate for OMERO's ``points`` string.
-
-    Deliberately avoids ``f"{value:g}"``. ``%g`` means six *significant*
-    digits, not six decimal places, so a whole-slide coordinate such as
-    ``82515.98`` is written as ``82516`` and every vertex shifts by up to
-    half a pixel. On a typical slide export that silently affects over 90%
-    of coordinates.
 
     :param value: the coordinate to format
     :type value: float
@@ -108,9 +90,6 @@ def format_coord(value: float, ndigits: int = 2) -> str:
 def ring_to_points(ring: list[list[float]], ndigits: int = 2) -> str:
     """Convert ``[[x, y], ...]`` to the ``"x,y x,y"`` string OMERO stores.
 
-    The repeated closing point GeoJSON uses is dropped, since OMERO's polygon
-    closes itself.
-
     :param ring: coordinate pairs
     :type ring: list[list[float]]
     :param ndigits: decimal places to keep per coordinate
@@ -126,11 +105,6 @@ def ring_to_points(ring: list[list[float]], ndigits: int = 2) -> str:
 
 def points_to_ring(points: str | None) -> list[list[float]]:
     """Parse an OMERO ``points`` string back into ``[[x, y], ...]``.
-
-    Commas and whitespace are treated alike, because some clients write
-    ``"x1,y1, x2,y2"`` with a separator between pairs as well as within them.
-    A shape can legitimately be stored with its points unset, so ``None`` and
-    unparseable tokens yield an empty list rather than raising.
 
     :param points: stored points text, or ``None``
     :type points: str | None
@@ -179,11 +153,6 @@ def open_ring(ring: list[list[float]]) -> list[list[float]]:
 def drop_consecutive_duplicates(ring: list[list[float]]) -> list[list[float]]:
     """Remove neighbouring identical points.
 
-    Splicing a hole out of a bridged ring leaves the cut vertex sitting next
-    to itself. That is geometrically harmless but would accumulate a little
-    more on every export/import cycle, so clearing it keeps repeated archive
-    runs byte-stable.
-
     :param ring: coordinate pairs
     :type ring: list[list[float]]
     :return: the ring with adjacent duplicates collapsed
@@ -214,26 +183,8 @@ def signed_area(ring: list[list[float]]) -> float:
     return total / 2.0
 
 
-# --------------------------------------------------------------------------
-# holes
-# --------------------------------------------------------------------------
-
-
 def bridge_hole(outer: list[list[float]], hole: list[list[float]]) -> list[list[float]]:
     """Fold a hole into its outer ring as one self-touching ring.
-
-    OMERO's polygon is a flat list of points with no interior rings, so the
-    hole is joined to the outline by a zero-width "keyhole" slit: cut from
-    the outer ring to the nearest hole vertex, walk the hole, and cut back
-    out along the same line. Because the two cut edges coincide, the nonzero
-    fill rule used by OMERO.web and iviewer renders the hole as a hole.
-
-    The hole is reversed when needed so it winds against the outline; without
-    that the fill rule adds its area instead of subtracting it.
-
-    Bridging between nearest vertices can self-intersect on pathologically
-    concave outlines. It behaves for the tissue and tumour boundaries this is
-    aimed at, and :func:`unbridge_ring` reverses it exactly.
 
     :param outer: the outer ring
     :type outer: list[list[float]]
@@ -267,12 +218,6 @@ def bridge_hole(outer: list[list[float]], hole: list[list[float]]) -> list[list[
 def find_bridge(ring: list[list[float]]) -> tuple[int, int] | None:
     """Locate a keyhole slit in a ring.
 
-    :func:`bridge_hole` produces ``outer[:i+1] + hole_loop + outer[i:]``,
-    where the hole loop starts and ends on the same vertex. That leaves two
-    signatures at once: a vertex appearing twice, *and* the run between those
-    occurrences being itself closed. Requiring both is what stops an ordinary
-    repeated vertex being mistaken for a slit.
-
     :param ring: coordinate pairs, closing point omitted
     :type ring: list[list[float]]
     :return: ``(start, end)`` bounding the spliced hole, or ``None``
@@ -300,10 +245,6 @@ def unbridge_ring(
 ) -> tuple[list[list[float]], list[list[list[float]]]]:
     """Split a bridged ring back into an outer ring and its holes.
 
-    Repeats until no slit remains, so a shape carrying several bridged holes
-    comes apart fully. A ring with no slit is returned unchanged with no
-    holes, which is what makes this safe to run over every polygon.
-
     :param ring: a possibly-bridged ring, closing point omitted
     :type ring: list[list[float]]
     :return: ``(outer ring, [closed hole rings])``
@@ -318,17 +259,10 @@ def unbridge_ring(
             break
         start, end = found
         hole = outer[start + 1 : end]
-        # Reverse the winding back: GeoJSON does not care, but it keeps
-        # exports looking like what QuPath itself writes.
         holes.append(close_ring(drop_consecutive_duplicates(hole[::-1])))
         outer = drop_consecutive_duplicates([*outer[: start + 1], *outer[end:]])
 
     return outer, holes
-
-
-# --------------------------------------------------------------------------
-# shapes OMERO has that GeoJSON does not
-# --------------------------------------------------------------------------
 
 
 def rectangle_to_ring(

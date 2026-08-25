@@ -2,11 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 """
-Move QuPath GeoJSON annotations in and out of OMERO.
+Move GeoJSON annotations into and out of OMERO.
 
-QuPath writes annotations as GeoJSON; OMERO stores them as ROI rows in its
-database. The two models disagree in ways that lose data if you convert
-naively, and this package handles those differences:
+geojson files and the ROI's that omero holds are different modes. This
+is to help convert the them.
 
 * **Interior rings.** OMERO's polygon is one flat point list with no concept
   of a hole. Holes are folded in as a zero-width "keyhole" slit that renders

@@ -6,7 +6,7 @@ QuPath GeoJSON reading, writing, and conversion to and from OMERO shapes.
 
 This module holds the whole conversion in a form that needs no server: a
 GeoJSON feature becomes a list of :class:`ShapeSpec`, and a list of
-:class:`ShapeSpec` becomes a GeoJSON geometry again. :mod:`lavlab.geojson.omero_io`
+:class:`ShapeSpec` becomes a GeoJSON geometry again.`lavlab.geojson.omero_io`
 is the only part that talks to OMERO.
 
 Warnings are collected into the returned result rather than printed, so the
@@ -39,7 +39,7 @@ DEFAULT_COLOR = (255, 255, 0)
 #: Marker written into ``Roi.description`` so we only read back our own JSON.
 PROVENANCE_TAG = "qupath"
 
-#: Shape kinds this package understands.
+#: Shape kinds
 POLYGON = "polygon"
 POLYLINE = "polyline"
 POINT = "point"
@@ -105,16 +105,11 @@ class ConversionResult:
     """What a conversion produced, plus anything worth telling the user.
 
     :param annotations: successfully converted objects
-    :param warnings: human-readable notes about skipped or altered content
+    :param warnings: notes about skipped or altered content
     """
 
     annotations: list[Annotation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-
-
-# --------------------------------------------------------------------------
-# reading GeoJSON
-# --------------------------------------------------------------------------
 
 
 def load_features(path: str | Path) -> list[dict]:
@@ -154,9 +149,6 @@ def parse_classification(
     feature: dict,
 ) -> tuple[str | None, tuple | None]:
     """Extract the class name and colour from a feature's properties.
-
-    Handles both the QuPath 0.4+ ``color`` list and the 0.3 packed
-    ``colorRGB`` integer.
 
     :param feature: a GeoJSON feature
     :type feature: dict
@@ -262,11 +254,6 @@ def convert_file(path: str | Path) -> ConversionResult:
         if annotation is not None:
             result.annotations.append(annotation)
     return result
-
-
-# --------------------------------------------------------------------------
-# writing GeoJSON
-# --------------------------------------------------------------------------
 
 
 def provenance_json(annotation: Annotation) -> str | None:
