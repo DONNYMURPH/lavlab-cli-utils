@@ -73,9 +73,21 @@ def resolve_creds(
 
 @dataclass(frozen=True)
 class FsMapEntry:
+    """One fs_map regex -> directory rule.
+
+    ``subject_glob``, if set, names a regex group whose captured value is
+    matched as a *suffix* against directories directly under ``base_dir``
+    (``glob(base_dir + "/*" + value)``); the matched directory replaces
+    ``base_dir`` for this resolution. The lab's on-disk subject directories
+    don't consistently share the OMERO image name's prefix (subject "101"
+    lives in a directory named "1101"), so a literal ``${subject}``
+    substitution can't find them.
+    """
+
     match: "re.Pattern[str]"
     base_dir: str
     formatted_dir: str
+    subject_glob: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +127,7 @@ def load_fs_map(path: Optional[str]) -> dict[str, FsMapGroup]:
                 match=re.compile(m["match"]),
                 base_dir=m["base_dir"],
                 formatted_dir=m["formatted_dir"],
+                subject_glob=m.get("subject_glob"),
             )
             for m in group_data.get("maps", [])
         ]

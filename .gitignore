@@ -28,6 +28,7 @@ env/
 # Some notebook outputs in there contain real OMERO usernames/hostnames
 # from having actually been run against the lab server -- never commit it.
 /legacy/
+/scripts/
 
 # The Ice wheel goes here for Docker builds (see Dockerfile) -- it's a
 # large binary from a lab-internal URL, not something to commit.

@@ -7,6 +7,7 @@ segment (so ``foo.ome.tiff`` -> ``foo``).
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 from typing import Optional
@@ -54,10 +55,24 @@ def resolve_fs_map_dir(
                 f"fs_map base_dir '{entry.base_dir}' for group {group_id} "
                 "does not exist -- is the storage mounted?"
             )
+
+        base_dir = entry.base_dir
+        if entry.subject_glob:
+            value = match.group(entry.subject_glob)
+            candidates = sorted(glob.glob(os.path.join(entry.base_dir, f"*{value}")))
+            if not candidates:
+                log.warning(
+                    "fs_map: no directory under '%s' matching '*%s' for '%s'; "
+                    "trying the next entry.",
+                    entry.base_dir, value, filename,
+                )
+                continue
+            base_dir = candidates[0]
+
         formatted = entry.formatted_dir
         for name, value in match.groupdict().items():
             formatted = formatted.replace(f"${{{name}}}", value or "")
-        return os.path.join(entry.base_dir, formatted)
+        return os.path.join(base_dir, formatted)
 
     return None
 
