@@ -7,6 +7,7 @@ import argparse
 import logging
 import multiprocessing
 import os
+from typing import Optional
 
 import numpy as np
 import pyvips as pv
@@ -21,6 +22,7 @@ from lavlab.commands._shared import (
     parse_target,
 )
 from lavlab.config import ConfigError
+from lavlab.imaging import write_recon
 from lavlab.naming import resolve_output_path
 from lavlab.omero_client import get_source_file_path, is_conn_error, iter_image_ids
 from lavlab.roi import get_roi_mask
@@ -70,18 +72,20 @@ def run(args: argparse.Namespace) -> None:
         _run_single(args, target)
 
 
-def _render_and_write(image, args: argparse.Namespace, output_path: str) -> bool:
-    mask = get_roi_mask(
+def _render_and_write(image, args: argparse.Namespace, output_path: str) -> Optional[int]:
+    """Render and write the ROI mask; returns how many shapes were
+    rendered, or None if nothing matched the given filters."""
+    mask, shape_count = get_roi_mask(
         image, args.downsample, include_all=args.all, text_filter=args.text_filter, palette=args.palette
     )
     if mask.size == 0:
         log.info("Image %d: no ROIs matched the given filters.", image.getId())
-        return False
+        return None
     ensure_parent_dir(output_path)
     roi_img = pv.Image.new_from_array(mask)
     del mask
-    roi_img.write_to_file(output_path)
-    return True
+    write_recon(roi_img, output_path, lossless=True)
+    return shape_count
 
 
 def _run_single(args: argparse.Namespace, image_id: int) -> None:
@@ -106,9 +110,10 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
             print(f"Already exists, skipping (use --override to replace): {output_path}")
             return
 
-        if not _render_and_write(image, args, output_path):
+        shape_count = _render_and_write(image, args, output_path)
+        if shape_count is None:
             raise SystemExit(f"error: no ROIs found for image {image_id} under the given filters.")
-        print(f"Completed ROI for image {image_id}: {output_path}")
+        print(f"Completed ROI for image {image_id}: {output_path} ({shape_count} shape(s))")
     finally:
         conn.close()
 
@@ -155,10 +160,11 @@ def _process_one(image_id: int):
             if os.path.exists(output_path) and not args.override:
                 return (image_id, output_path)
 
-            if not _render_and_write(image, args, output_path):
+            shape_count = _render_and_write(image, args, output_path)
+            if shape_count is None:
                 return None
 
-            print(f"Completed ROI for image {image_id}: {output_path}")
+            print(f"Completed ROI for image {image_id}: {output_path} ({shape_count} shape(s))")
             return (image_id, output_path)
         except ConfigError:
             raise

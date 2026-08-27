@@ -1,9 +1,12 @@
 """Three-tier large-recon fetch orchestrator.
 
 Tries, in order: an existing OMERO ``LargeRecon.{downsample}`` file
-annotation; a locally-mounted source file; OMERO's tile API. Whichever of
-the latter two produces an image is written out and (unless skipped)
-uploaded back to OMERO under the same namespace so later calls hit tier one.
+annotation matching the requested format; a locally-mounted source file;
+OMERO's tile API. Whichever of the latter two produces an image is written
+out and (unless skipped) uploaded back to OMERO under the same namespace,
+under a canonical ``LR{downsample}_{image name}.{ext}`` filename independent
+of wherever it was written locally, so later calls at the same
+downsample+format hit tier one.
 """
 
 from __future__ import annotations
@@ -14,12 +17,22 @@ import os
 from typing import Literal
 
 from lavlab.imaging import load_downsampled, write_recon
+from lavlab.naming import build_filename
 from lavlab.omero_client import get_source_file_path
 from lavlab.omero_tiles import generate_over_network
 
 log = logging.getLogger(__name__)
 
 _NAMESPACE_PREFIX = "LargeRecon."
+
+_MIMETYPES = {
+    "jp2": "image/jp2",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "tif": "image/tiff",
+    "tiff": "image/tiff",
+}
 
 Tier = Literal["annotation", "local", "network"]
 
@@ -28,17 +41,27 @@ def _namespace(downsample: int) -> str:
     return f"{_NAMESPACE_PREFIX}{downsample}"
 
 
-def _find_jp2_annotation(image, namespace: str):
-    """Return the FileAnnotation for *namespace* iff its file ends in
-    '.jp2'; otherwise None -- including a stale legacy '.jpg' hit, which
-    must be treated as 'not found', not surfaced as an error."""
-    ann = image.getAnnotation(namespace)
-    if ann is None or not hasattr(ann, "getFile"):
-        return None
-    f = ann.getFile()
-    if f is None or not f.getName().lower().endswith(".jp2"):
-        return None
-    return ann
+def _ext_of(output_path: str) -> str:
+    return os.path.splitext(output_path)[1].lstrip(".").lower()
+
+
+def _mimetype_for_ext(ext: str) -> str:
+    return _MIMETYPES.get(ext, "application/octet-stream")
+
+
+def _find_annotation(image, namespace: str, ext: str):
+    """Return the FileAnnotation in *namespace* whose file ends in
+    ``.{ext}``, searching every annotation under the namespace (not just
+    OMERO's arbitrary "first" match) so a namespace holding more than one
+    format -- e.g. both a .jp2 and a .jpg at the same downsample -- still
+    finds the one that actually matches what was asked for."""
+    for ann in image.listAnnotations(ns=namespace):
+        if not hasattr(ann, "getFile"):
+            continue
+        f = ann.getFile()
+        if f is not None and f.getName().lower().endswith(f".{ext}"):
+            return ann
+    return None
 
 
 def _download_annotation(ann, output_path: str) -> None:
@@ -60,22 +83,30 @@ def _download_annotation(ann, output_path: str) -> None:
         raise
 
 
-def _upload_and_replace(conn, image, namespace: str, output_path: str) -> None:
-    """Remove any stale *.jp2* annotation(s) in *namespace* -- i.e. ones this
-    function itself could have written -- then upload *output_path* as the
-    new one. Any other-format annotation sharing the namespace (e.g. an
-    older, manually-uploaded PNG/JPG large recon) is left untouched; only
-    what tier one itself would accept as "ours" is treated as replaceable.
+def _upload_and_replace(
+    conn, image, namespace: str, output_path: str, ext: str, remote_name: str
+) -> None:
+    """Remove any stale annotation(s) in *namespace* matching *ext* -- i.e.
+    ones this function itself could have written in this same format --
+    then upload *output_path* as the new one, named *remote_name* (the
+    canonical ``LR{downsample}_{image name}.{ext}``, independent of
+    whatever local path it was written to). Annotations in other formats
+    sharing the namespace (e.g. an older, manually-uploaded PNG/JPG large
+    recon) are left untouched; only what tier one itself would accept as
+    "ours" for this format is treated as replaceable.
     """
     for ann in image.listAnnotations(ns=namespace):
         if not hasattr(ann, "getFile"):
             continue
         f = ann.getFile()
-        if f is None or not f.getName().lower().endswith(".jp2"):
+        if f is None or not f.getName().lower().endswith(f".{ext}"):
             continue
         image.removeAnnotations([ann])
         conn.deleteObject(ann._obj)
-    file_ann = conn.createFileAnnfromLocalFile(output_path, mimetype="image/jp2", ns=namespace)
+    file_ann = conn.createFileAnnfromLocalFile(
+        output_path, origFilePathAndName=remote_name,
+        mimetype=_mimetype_for_ext(ext), ns=namespace,
+    )
     image.linkAnnotation(file_ann)
 
 
@@ -95,16 +126,10 @@ def fetch_large_recon(
     skip_upload: bool = False,
 ) -> Tier:
     """Fetch or generate a large-recon for *image* at *downsample*, writing
-    it to *output_path*.
-
-    The OMERO annotation cache (both tiers) only ever holds ``.jp2`` --
-    that's the canonical format `lr` shares across the lab. If *output_path*
-    doesn't end in ``.jp2`` (an explicit ``-o`` naming some other format),
-    the annotation tier is skipped on read (downloading raw JP2 bytes into
-    a wrongly-named file would produce a corrupt file) and on write
-    (uploading, say, JPEG bytes mislabeled as ``image/jp2`` would corrupt
-    the shared cache for everyone). Local/network generation still honors
-    whatever format *output_path* names.
+    it to *output_path*. The requested format is whatever *output_path*'s
+    extension is -- that's the single source of truth for what gets
+    written, what the annotation cache is searched/uploaded as, and what
+    mimetype is recorded.
 
     :param regenerate: Skip the annotation-tier lookup entirely and
         regenerate fresh.
@@ -114,35 +139,55 @@ def fetch_large_recon(
     :raises lavlab.omero_tiles.LargeReconError: propagated unwrapped from
         tier "network".
     """
+    image_id = image.getId()
     _ensure_parent_dir(output_path)
     namespace = _namespace(downsample)
-    is_jp2_output = output_path.lower().endswith(".jp2")
+    ext = _ext_of(output_path)
+    cache_eligible = bool(ext)
 
-    if not regenerate and is_jp2_output:
-        ann = _find_jp2_annotation(image, namespace)
+    if cache_eligible and not regenerate:
+        ann = _find_annotation(image, namespace, ext)
         if ann is not None:
+            log.info(
+                "Image %d: found cached .%s large-recon (namespace %s); downloading...",
+                image_id, ext, namespace,
+            )
             _download_annotation(ann, output_path)
+            log.info("Image %d: downloaded cached recon to %s.", image_id, output_path)
             return "annotation"
 
-    src_path = get_source_file_path(conn, image.getId())
+    src_path = get_source_file_path(conn, image_id)
     if src_path is not None and os.path.exists(src_path):
+        log.info("Image %d: no usable cache; generating from local source %s...",
+                  image_id, src_path)
         img = load_downsampled(src_path, downsample)
         tier: Tier = "local"
     else:
+        log.info(
+            "Image %d: no usable cache or local source; generating over the "
+            "network (this can take several minutes)...", image_id,
+        )
         img = generate_over_network(conn, image, downsample)
         tier = "network"
 
+    log.info("Image %d: writing recon to %s...", image_id, output_path)
     write_recon(img, output_path, lossless=True)
     del img
+    log.info("Image %d: wrote %s.", image_id, output_path)
 
-    if not skip_upload and is_jp2_output:
+    if not skip_upload and cache_eligible:
+        remote_name = build_filename(downsample, image.getName(), ext=ext)
+        log.info("Image %d: uploading recon to OMERO as %s (namespace %s)...",
+                  image_id, remote_name, namespace)
         try:
-            _upload_and_replace(conn, image, namespace, output_path)
+            _upload_and_replace(conn, image, namespace, output_path, ext, remote_name)
         except Exception:
             log.warning(
                 "Image %d: large-recon written to '%s' but upload to OMERO "
                 "failed; future runs will regenerate instead of reusing it.",
-                image.getId(), output_path, exc_info=True,
+                image_id, output_path, exc_info=True,
             )
+        else:
+            log.info("Image %d: uploaded and linked as %s.", image_id, remote_name)
 
     return tier

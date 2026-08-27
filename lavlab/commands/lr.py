@@ -39,6 +39,12 @@ def add_parser(subparsers) -> None:
         "--skip-upload", action="store_true",
         help="Don't upload the generated large-recon back to OMERO as an annotation.",
     )
+    parser.add_argument(
+        "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
+        help="Output format when the filename isn't fixed by an explicit -o path "
+             "(default: jp2). Also selects which format is searched for/uploaded as "
+             "an OMERO large-recon annotation.",
+    )
     add_common_output_args(parser)
     add_creds_args(parser)
     parser.set_defaults(handler=run)
@@ -71,7 +77,7 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         fs_map = load_fs_map_from_args(args)
         try:
             output_path = resolve_output_path(
-                args.output, fs_map, group_id, name, args.downsample, ext="jp2", batch=False
+                args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=False
             )
         except ConfigError as exc:
             raise SystemExit(f"error: {exc}")
@@ -120,7 +126,7 @@ def _process_one(image_id: int):
             name = image.getName()
 
             output_path = resolve_output_path(
-                args.output, fs_map, group_id, name, args.downsample, ext="jp2", batch=True
+                args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=True
             )
             if output_path is None:
                 log.warning("Image %d: no usable output directory, skipping.", image_id)
