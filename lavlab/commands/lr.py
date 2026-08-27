@@ -11,15 +11,14 @@ from lavlab.commands._shared import (
     add_common_output_args,
     add_creds_args,
     connect_from_args,
-    ensure_parent_dir,
     group_of,
     load_fs_map_from_args,
     parse_target,
 )
 from lavlab.config import ConfigError
-from lavlab.imaging import load_downsampled, write_recon
+from lavlab.large_recon import fetch_large_recon
 from lavlab.naming import resolve_output_path
-from lavlab.omero_client import get_source_file_path, is_conn_error, iter_image_ids
+from lavlab.omero_client import is_conn_error, iter_image_ids
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +29,16 @@ def add_parser(subparsers) -> None:
     parser.add_argument("-o", "--output", help="Output file (single) or directory (batch).")
     parser.add_argument("-g", "--group", type=int, help="OMERO group ID (batch mode only).")
     parser.add_argument("--workers", type=int, default=8, help="Parallel workers for batch mode (default: 8).")
+    parser.add_argument(
+        "--regenerate", action="store_true",
+        help="Ignore any existing OMERO large-recon annotation and regenerate fresh, "
+             "re-uploading the result (combine with --override to also force "
+             "regeneration when the local output file already exists).",
+    )
+    parser.add_argument(
+        "--skip-upload", action="store_true",
+        help="Don't upload the generated large-recon back to OMERO as an annotation.",
+    )
     add_common_output_args(parser)
     add_creds_args(parser)
     parser.set_defaults(handler=run)
@@ -41,6 +50,13 @@ def run(args: argparse.Namespace) -> None:
         _run_batch(args)
     else:
         _run_single(args, target)
+
+
+def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -> str:
+    return fetch_large_recon(
+        conn, image, args.downsample, output_path,
+        regenerate=args.regenerate, skip_upload=args.skip_upload,
+    )
 
 
 def _run_single(args: argparse.Namespace, image_id: int) -> None:
@@ -64,13 +80,7 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
             print(f"Already exists, skipping (use --override to replace): {output_path}")
             return
 
-        src_path = get_source_file_path(conn, image_id)
-        if src_path is None or not os.path.exists(src_path):
-            raise SystemExit(f"error: source file for image {image_id} is not accessible.")
-
-        ensure_parent_dir(output_path)
-        lossless = output_path.lower().endswith(".jp2")
-        write_recon(load_downsampled(src_path, args.downsample), output_path, lossless)
+        _render_and_write(conn, image, args, output_path)
         print(f"Completed image {image_id}: {output_path}")
     finally:
         conn.close()
@@ -119,14 +129,7 @@ def _process_one(image_id: int):
             if os.path.exists(output_path) and not args.override:
                 return (image_id, output_path)
 
-            src_path = get_source_file_path(conn, image_id)
-            if src_path is None or not os.path.exists(src_path):
-                log.warning("Image %d: source file not accessible, skipping.", image_id)
-                return None
-
-            ensure_parent_dir(output_path)
-            lossless = output_path.lower().endswith(".jp2")
-            write_recon(load_downsampled(src_path, args.downsample), output_path, lossless)
+            _render_and_write(conn, image, args, output_path)
             print(f"Completed image {image_id}: {output_path}")
             return (image_id, output_path)
         except ConfigError:

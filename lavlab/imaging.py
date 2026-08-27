@@ -97,7 +97,8 @@ def is_rgb(image_path: str) -> bool:
         return False
 
 def write_recon(img, output_path: str, lossless: bool = True) -> None:
-    if output_path.lower().endswith(".jp2"):
+    ext = output_path.lower()
+    if ext.endswith(".jp2"):
         from PIL import Image as PILImage
         mem = img.write_to_memory()
         arr = np.ndarray(buffer=mem, dtype=np.uint8, shape=(img.height, img.width, img.bands))
@@ -106,5 +107,10 @@ def write_recon(img, output_path: str, lossless: bool = True) -> None:
         PILImage.fromarray(arr).save(
             output_path, irreversible=not lossless, tile_size=(1024, 1024)
         )
+    elif ext.endswith((".jpg", ".jpeg", ".png")):
+        # Neither format's libvips saver accepts a `lossless` option -- JPEG
+        # is inherently lossy and PNG is inherently lossless, so there's
+        # nothing for the flag to control.
+        img.write_to_file(output_path)
     else:
         img.write_to_file(output_path, lossless=lossless)

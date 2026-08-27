@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+import os
+
+import pytest
+
+try:
+    import pyvips  # noqa: F401
+except Exception as exc:  # pragma: no cover
+    pytest.skip(f"pyvips unavailable: {exc}", allow_module_level=True)
+
+from lavlab import large_recon
+from lavlab.large_recon import fetch_large_recon
+from lavlab.omero_tiles import LargeReconError
+
+
+class _FakeOriginalFile:
+    def __init__(self, name):
+        self._name = name
+
+    def getName(self):
+        return self._name
+
+
+class _FakeFileAnnotation:
+    def __init__(self, name, content=b"fake-jp2-bytes", fail_after=None):
+        self._file = _FakeOriginalFile(name)
+        self._content = content
+        self._fail_after = fail_after
+        self._obj = object()
+
+    def getFile(self):
+        return self._file
+
+    def getFileInChunks(self, buf=2621440):
+        chunks = [self._content[:4], self._content[4:]]
+        for i, chunk in enumerate(chunks):
+            if self._fail_after is not None and i == self._fail_after:
+                raise IOError("boom")
+            yield chunk
+
+
+class _FakeImage:
+    def __init__(self, image_id=1, annotation=None, list_annotations=None):
+        self._id = image_id
+        self._ann = annotation
+        self._list_annotations = (
+            list(list_annotations) if list_annotations is not None
+            else ([annotation] if annotation is not None else [])
+        )
+        self.removed = []
+        self.linked = []
+
+    def getId(self):
+        return self._id
+
+    def getAnnotation(self, ns=None):
+        return self._ann
+
+    def listAnnotations(self, ns=None):
+        return list(self._list_annotations)
+
+    def removeAnnotations(self, anns):
+        self.removed.extend(anns)
+
+
+    def linkAnnotation(self, ann):
+        self.linked.append(ann)
+
+
+class _FakeConn:
+    def __init__(self):
+        self.deleted = []
+        self.uploaded = []
+        self._create_should_fail = False
+
+    def deleteObject(self, obj):
+        self.deleted.append(obj)
+
+    def createFileAnnfromLocalFile(self, path, mimetype=None, ns=None):
+        if self._create_should_fail:
+            raise RuntimeError("upload failed")
+        self.uploaded.append((path, mimetype, ns))
+        return _FakeFileAnnotation(name=os.path.basename(path))
+
+
+def _forbid(*_args, **_kwargs):
+    raise AssertionError("should not be called")
+
+
+def _stub_write_recon(monkeypatch, tmp_path_holder=None):
+    def _write(img, output_path, lossless=True):
+        with open(output_path, "wb") as fh:
+            fh.write(b"generated")
+    monkeypatch.setattr(large_recon, "write_recon", _write)
+
+
+def test_annotation_tier_hit_valid_jp2(tmp_path, monkeypatch):
+    ann = _FakeFileAnnotation("LR10_foo.jp2")
+    image = _FakeImage(annotation=ann)
+    conn = _FakeConn()
+    monkeypatch.setattr(large_recon, "generate_over_network", _forbid)
+    monkeypatch.setattr(large_recon, "load_downsampled", _forbid)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "annotation"
+    assert out.read_bytes() == b"fake-jp2-bytes"
+    assert conn.uploaded == []
+    assert not (tmp_path / "out.jp2.part").exists()
+
+
+def test_non_jp2_output_skips_annotation_tier_even_when_valid(tmp_path, monkeypatch):
+    # A valid .jp2 annotation exists, but the caller asked for a .jpg
+    # output -- downloading raw JP2 bytes into a .jpg-named file would be
+    # corrupt, so the annotation tier must be bypassed entirely.
+    ann = _FakeFileAnnotation("LR10_foo.jp2")
+    image = _FakeImage(annotation=ann)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jpg"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "network"
+    assert out.exists()
+
+
+def test_non_jp2_output_skips_upload(tmp_path, monkeypatch):
+    # Writing a .png locally must never upload those bytes to OMERO
+    # mislabeled as image/jp2 -- that would corrupt the shared cache.
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.png"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "network"
+    assert conn.uploaded == []
+    assert image.removed == []
+
+
+def test_annotation_miss_legacy_jpg_falls_through_to_local(tmp_path, monkeypatch):
+    old_ann = _FakeFileAnnotation("LR10_foo.jpg")
+    image = _FakeImage(annotation=old_ann)
+    conn = _FakeConn()
+
+    src = tmp_path / "src.tif"
+    src.write_bytes(b"whatever")
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: str(src))
+    monkeypatch.setattr(large_recon, "load_downsampled", lambda p, d: object())
+    monkeypatch.setattr(large_recon, "generate_over_network", _forbid)
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "local"
+    assert out.read_bytes() == b"generated"
+    # A non-.jp2 annotation sharing the namespace (e.g. an older,
+    # manually-uploaded .jpg large recon) must NOT be deleted -- only
+    # something this tool itself could have written (.jp2) is "ours".
+    assert image.removed == []
+    assert conn.deleted == []
+    assert conn.uploaded == [(str(out), "image/jp2", "LargeRecon.10")]
+
+
+@pytest.mark.parametrize("src_path", [None, "/does/not/exist.tif"])
+def test_local_tier_miss_falls_through_to_network(tmp_path, monkeypatch, src_path):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: src_path)
+    monkeypatch.setattr(large_recon, "load_downsampled", _forbid)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "network"
+    assert out.exists()
+
+
+def test_regenerate_skips_valid_annotation(tmp_path, monkeypatch):
+    ann = _FakeFileAnnotation("LR10_foo.jp2")
+    image = _FakeImage(annotation=ann)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out), regenerate=True)
+
+    assert tier == "network"
+    assert image.removed == [ann]
+    assert conn.deleted == [ann._obj]
+    assert conn.uploaded == [(str(out), "image/jp2", "LargeRecon.10")]
+
+
+def test_upload_preserves_other_format_annotations_sharing_the_namespace(tmp_path, monkeypatch):
+    # e.g. an older, manually-uploaded LR10_*.png sitting in the same
+    # LargeRecon.10 namespace as a stale .jp2 this tool previously wrote.
+    stale_jp2 = _FakeFileAnnotation("LR10_foo.jp2")
+    other_png = _FakeFileAnnotation("LR10_foo.png")
+    image = _FakeImage(list_annotations=[stale_jp2, other_png])
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out), regenerate=True)
+
+    assert tier == "network"
+    assert image.removed == [stale_jp2]
+    assert conn.deleted == [stale_jp2._obj]
+    assert conn.uploaded == [(str(out), "image/jp2", "LargeRecon.10")]
+
+
+def test_skip_upload_true_does_not_touch_annotations(tmp_path, monkeypatch):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out), skip_upload=True)
+
+    assert tier == "network"
+    assert conn.uploaded == []
+    assert image.removed == []
+
+
+def test_upload_failure_is_logged_not_raised(tmp_path, monkeypatch, caplog):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+    conn._create_should_fail = True
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    with caplog.at_level("WARNING"):
+        tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "network"
+    assert out.exists()
+    assert any("upload to OMERO" in r.message for r in caplog.records)
+
+
+def test_network_tier_error_propagates_unwrapped(tmp_path, monkeypatch):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+
+    def _raise(c, im, d):
+        raise LargeReconError("boom")
+
+    monkeypatch.setattr(large_recon, "generate_over_network", _raise)
+
+    out = tmp_path / "out.jp2"
+    with pytest.raises(LargeReconError, match="boom"):
+        fetch_large_recon(conn, image, 10, str(out))
+
+
+def test_download_annotation_cleans_up_partial_file_on_failure(tmp_path):
+    ann = _FakeFileAnnotation("LR10_foo.jp2", fail_after=1)
+    out = tmp_path / "out.jp2"
+
+    with pytest.raises(IOError):
+        large_recon._download_annotation(ann, str(out))
+
+    assert not out.exists()
+    assert not (tmp_path / "out.jp2.part").exists()
+
+
+def test_creates_missing_parent_directory(tmp_path, monkeypatch):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: None)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "a" / "b" / "out.jp2"
+    tier = fetch_large_recon(conn, image, 10, str(out))
+
+    assert tier == "network"
+    assert out.exists()
+
+
+def test_namespace_format():
+    assert large_recon._namespace(10) == "LargeRecon.10"

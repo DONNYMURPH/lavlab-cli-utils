@@ -47,7 +47,7 @@ def add_parser(subparsers) -> None:
         help="path to write the DICOM SEG object to",
     )
     nii2dcm.add_argument(
-        "--template", help="dcmqi metainfo JSON template (default: bundled template)"
+        "--template", help="segment-attributes JSON template for highdicom (default: bundled template)"
     )
     nii2dcm.add_argument(
         "--label", dest="segment_label", help="overrides the template's segment 1 label"
