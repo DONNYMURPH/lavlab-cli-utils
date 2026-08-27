@@ -21,7 +21,7 @@ _DEFAULT_TILE_SIZE = (1024, 1024)
 
 _SIZE_WARN_BYTES = 4 * 1024**3
 
-Tile = tuple[int, int, int, tuple[int, int, int, int]]  # (z, c, t, (x, y, w, h))
+Tile = tuple[int, int, int, tuple[int, int, int, int]]
 
 
 class LargeReconError(Exception):

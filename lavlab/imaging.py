@@ -95,3 +95,16 @@ def is_rgb(image_path: str) -> bool:
         return pv.Image.new_from_file(image_path, access="sequential").bands == 3
     except Exception:
         return False
+
+def write_recon(img, output_path: str, lossless: bool = True) -> None:
+    if output_path.lower().endswith(".jp2"):
+        from PIL import Image as PILImage
+        mem = img.write_to_memory()
+        arr = np.ndarray(buffer=mem, dtype=np.uint8, shape=(img.height, img.width, img.bands))
+        if img.bands == 1:
+            arr = arr[:, :, 0]
+        PILImage.fromarray(arr).save(
+            output_path, irreversible=not lossless, tile_size=(1024, 1024)
+        )
+    else:
+        img.write_to_file(output_path, lossless=lossless)

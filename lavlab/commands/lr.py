@@ -17,7 +17,7 @@ from lavlab.commands._shared import (
     parse_target,
 )
 from lavlab.config import ConfigError
-from lavlab.imaging import load_downsampled
+from lavlab.imaging import load_downsampled, write_recon
 from lavlab.naming import resolve_output_path
 from lavlab.omero_client import get_source_file_path, is_conn_error, iter_image_ids
 
@@ -70,7 +70,7 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
 
         ensure_parent_dir(output_path)
         lossless = output_path.lower().endswith(".jp2")
-        load_downsampled(src_path, args.downsample).write_to_file(output_path, lossless=lossless)
+        write_recon(load_downsampled(src_path, args.downsample), output_path, lossless)
         print(f"Completed image {image_id}: {output_path}")
     finally:
         conn.close()
@@ -126,7 +126,7 @@ def _process_one(image_id: int):
 
             ensure_parent_dir(output_path)
             lossless = output_path.lower().endswith(".jp2")
-            load_downsampled(src_path, args.downsample).write_to_file(output_path, lossless=lossless)
+            write_recon(load_downsampled(src_path, args.downsample), output_path, lossless)
             print(f"Completed image {image_id}: {output_path}")
             return (image_id, output_path)
         except ConfigError:

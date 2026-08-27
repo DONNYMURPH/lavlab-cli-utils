@@ -7,12 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-#: pydicom 3.x loads its pixel data decoders/encoders as a plugin-style set
-#: of submodules rather than through top-level imports, so Nuitka's static
-#: analysis misses them -- the same class of problem omero_ice_modules()
-#: works around for OMERO's generated Ice modules. Without these, a
-#: compiled binary can import fine but fail at runtime the first time it
-#: actually needs to decode/encode DICOM pixel data (e.g. lavlab seg).
 PYDICOM_NUITKA_FLAGS = [
     "--include-module=pydicom.pixels.decoders.gdcm",
     "--include-module=pydicom.pixels.decoders.pillow",
