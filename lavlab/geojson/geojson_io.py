@@ -171,37 +171,10 @@ def parse_classification(
     return name, color
 
 
-def feature_to_annotation(feature: dict, warnings: list[str]) -> Annotation | None:
-    """Convert one GeoJSON feature into an :class:`Annotation`.
-
-    Holes are folded into their outer ring rather than dropped. Degenerate
-    rings are skipped, because an under-specified polygon would be stored as
-    invalid geometry rather than failing loudly.
-
-    :param feature: a GeoJSON feature
-    :type feature: dict
-    :param warnings: list appended to when content is skipped or altered
-    :type warnings: list[str]
-    :return: the converted object, or ``None`` if nothing usable remained
-    :rtype: Annotation | None
-    """
-    geometry = feature.get("geometry") or {}
-    geometry_type = geometry.get("type")
-    feature_id = feature.get("id", "<no id>")
-
-    if geometry_type not in ("Polygon", "MultiPolygon"):
-        warnings.append(
-            f"feature {feature_id}: skipped, unsupported geometry {geometry_type!r}"
-        )
-        return None
-
-    parts = (
-        [geometry["coordinates"]]
-        if geometry_type == "Polygon"
-        else geometry["coordinates"]
-    )
-    name, color = parse_classification(feature)
-
+def _polygon_shapes_from_parts(
+    parts: list, name: str | None, color: tuple | None,
+    warnings: list[str], feature_id,
+) -> list[ShapeSpec]:
     shapes: list[ShapeSpec] = []
     bridged = 0
     for part in parts:
@@ -219,13 +192,106 @@ def feature_to_annotation(feature: dict, warnings: list[str]) -> Annotation | No
             ring = bridge_hole(ring, hole)
             bridged += 1
         shapes.append(ShapeSpec(POLYGON, open_ring(ring), name, color or DEFAULT_COLOR))
-
-    if not shapes:
-        return None
     if bridged:
         warnings.append(
             f"feature {feature_id}: {bridged} hole(s) bridged into the outline"
         )
+    return shapes
+
+
+def _geometry_to_shapes(
+    geometry: dict, name: str | None, color: tuple | None,
+    warnings: list[str], feature_id,
+) -> list[ShapeSpec]:
+    """Convert one non-collection GeoJSON geometry into ShapeSpecs.
+
+    :param geometry: a single (non-``GeometryCollection``) GeoJSON geometry
+    :type geometry: dict
+    :param name: classification name to attach to every shape produced
+    :type name: str | None
+    :param color: colour to attach to every shape produced
+    :type color: tuple | None
+    :param warnings: list appended to when content is skipped or altered
+    :type warnings: list[str]
+    :param feature_id: the owning feature's id, for warning messages
+    :return: the converted shapes (possibly empty)
+    :rtype: list[ShapeSpec]
+    """
+    geometry_type = geometry.get("type")
+
+    if geometry_type in ("Polygon", "MultiPolygon"):
+        parts = (
+            [geometry["coordinates"]]
+            if geometry_type == "Polygon"
+            else geometry["coordinates"]
+        )
+        return _polygon_shapes_from_parts(parts, name, color, warnings, feature_id)
+
+    if geometry_type in ("Point", "MultiPoint"):
+        points = (
+            [geometry["coordinates"]]
+            if geometry_type == "Point"
+            else geometry["coordinates"]
+        )
+        shapes = []
+        for point in points:
+            if not point or len(point) < 2:
+                warnings.append(f"feature {feature_id}: skipped a degenerate point")
+                continue
+            shapes.append(ShapeSpec(POINT, [list(point[:2])], name, color or DEFAULT_COLOR))
+        return shapes
+
+    if geometry_type in ("LineString", "MultiLineString"):
+        lines = (
+            [geometry["coordinates"]]
+            if geometry_type == "LineString"
+            else geometry["coordinates"]
+        )
+        shapes = []
+        for line in lines:
+            if not line or len(line) < 2:
+                warnings.append(f"feature {feature_id}: skipped a degenerate line")
+                continue
+            shapes.append(ShapeSpec(POLYLINE, list(line), name, color or DEFAULT_COLOR))
+        return shapes
+
+    warnings.append(
+        f"feature {feature_id}: skipped, unsupported geometry {geometry_type!r}"
+    )
+    return []
+
+
+def feature_to_annotation(feature: dict, warnings: list[str]) -> Annotation | None:
+    """Convert one GeoJSON feature into an :class:`Annotation`.
+
+    Holes are folded into their outer ring rather than dropped. Degenerate
+    rings are skipped, because an under-specified polygon would be stored as
+    invalid geometry rather than failing loudly. A ``GeometryCollection`` --
+    how a ROI mixing shape kinds (e.g. a Polygon and a Point together) round
+    trips, since no single-type geometry can hold both -- becomes one
+    Annotation with one shape per sub-geometry, restoring the original ROI.
+
+    :param feature: a GeoJSON feature
+    :type feature: dict
+    :param warnings: list appended to when content is skipped or altered
+    :type warnings: list[str]
+    :return: the converted object, or ``None`` if nothing usable remained
+    :rtype: Annotation | None
+    """
+    geometry = feature.get("geometry") or {}
+    geometry_type = geometry.get("type")
+    feature_id = feature.get("id", "<no id>")
+    name, color = parse_classification(feature)
+
+    if geometry_type == "GeometryCollection":
+        shapes: list[ShapeSpec] = []
+        for sub_geometry in geometry.get("geometries") or []:
+            shapes.extend(_geometry_to_shapes(sub_geometry, name, color, warnings, feature_id))
+    else:
+        shapes = _geometry_to_shapes(geometry, name, color, warnings, feature_id)
+
+    if not shapes:
+        return None
 
     properties = feature.get("properties") or {}
     return Annotation(
@@ -304,25 +370,8 @@ def read_provenance(description: str | None) -> dict:
     return payload
 
 
-def shapes_to_geometry(shapes: list[ShapeSpec], unbridge: bool = True) -> dict | None:
-    """Combine one ROI's shapes into a single GeoJSON geometry.
-
-    Several polygons in one ROI become a ``MultiPolygon``, which is how a
-    QuPath MultiPolygon survives the trip in. Mixed shape kinds have no
-    GeoJSON equivalent and yield ``None``.
-
-    :param shapes: the shapes belonging to one ROI
-    :type shapes: list[ShapeSpec]
-    :param unbridge: restore keyhole slits as real interior rings
-    :type unbridge: bool
-    :return: a GeoJSON geometry, or ``None`` if nothing usable remained
-    :rtype: dict | None
-    """
-    kinds = {shape.kind for shape in shapes}
-    if len(kinds) != 1:
-        return None
-    kind = kinds.pop()
-
+def _geometry_for_kind(kind: str, shapes: list[ShapeSpec], unbridge: bool) -> dict | None:
+    """Combine same-kind shapes into a single GeoJSON geometry (no collection)."""
     if kind == POINT:
         usable = [s for s in shapes if s.points]
         if not usable:
@@ -362,6 +411,42 @@ def shapes_to_geometry(shapes: list[ShapeSpec], unbridge: bool = True) -> dict |
     if len(parts) == 1:
         return {"type": "Polygon", "coordinates": parts[0]}
     return {"type": "MultiPolygon", "coordinates": parts}
+
+
+def shapes_to_geometry(shapes: list[ShapeSpec], unbridge: bool = True) -> dict | None:
+    """Combine one ROI's shapes into a single GeoJSON geometry.
+
+    Several polygons in one ROI become a ``MultiPolygon``, which is how a
+    QuPath MultiPolygon survives the trip in. Mixed shape kinds -- e.g. a
+    Polygon and a Point in the same ROI -- have no single-type GeoJSON
+    equivalent, so they become a ``GeometryCollection`` instead: the only
+    way to keep every shape in the file rather than silently dropping the
+    whole ROI. ``build_roi`` on the OMERO import side already accepts a
+    flat, mixed-kind shape list per ROI, so this round trips cleanly even
+    though it isn't how QuPath itself would have written the file.
+
+    :param shapes: the shapes belonging to one ROI
+    :type shapes: list[ShapeSpec]
+    :param unbridge: restore keyhole slits as real interior rings
+    :type unbridge: bool
+    :return: a GeoJSON geometry, or ``None`` if nothing usable remained
+    :rtype: dict | None
+    """
+    kinds = {shape.kind for shape in shapes}
+    if len(kinds) == 1:
+        return _geometry_for_kind(kinds.pop(), shapes, unbridge)
+
+    geometries = []
+    for kind in sorted(kinds):
+        geometry = _geometry_for_kind(kind, [s for s in shapes if s.kind == kind], unbridge)
+        if geometry is not None:
+            geometries.append(geometry)
+
+    if not geometries:
+        return None
+    if len(geometries) == 1:
+        return geometries[0]
+    return {"type": "GeometryCollection", "geometries": geometries}
 
 
 def annotation_to_feature(
@@ -432,14 +517,13 @@ def summarise_features(features: list[dict]) -> dict:
     for feature in features:
         geometry_type = feature["geometry"]["type"]
         geometries[geometry_type] = geometries.get(geometry_type, 0) + 1
+        # Holes are a Polygon/MultiPolygon concept; a GeometryCollection has
+        # no top-level "coordinates" key at all, so it must be excluded here
+        # rather than accessed unconditionally.
+        if geometry_type not in ("Polygon", "MultiPolygon"):
+            continue
         coordinates = feature["geometry"]["coordinates"]
-        parts = (
-            [coordinates]
-            if geometry_type == "Polygon"
-            else coordinates
-            if geometry_type == "MultiPolygon"
-            else []
-        )
+        parts = [coordinates] if geometry_type == "Polygon" else coordinates
         if any(len(rings) > 1 for rings in parts):
             holed += 1
     return {

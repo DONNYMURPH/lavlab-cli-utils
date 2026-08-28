@@ -3,10 +3,10 @@
 # This image is NOT a runtime image -- it does not contain the compiled
 # lavlab binary. It's a pinned, disposable environment with the C compiler,
 # Nuitka, and every runtime dependency (numpy, pyvips, omero-py, highdicom,
-# SimpleITK, ...) pre-installed, so the Nuitka/Ice build (see
-# docs/handoff/07-next-steps.md) doesn't depend on whatever happens to be
-# installed on a given laptop. The actual compile runs against your live
-# source tree, mounted in at `docker run` time -- see usage below.
+# SimpleITK, ...) pre-installed, so the Nuitka/Ice build doesn't depend on
+# whatever happens to be installed on a given laptop. The actual compile
+# runs against your live source tree, mounted in at `docker run` time --
+# see usage below.
 #
 # ---------------------------------------------------------------------
 # Usage
@@ -25,8 +25,8 @@
 #        docker run --rm -v "$(pwd)":/src -v "$(pwd)/dist":/out lavlab-builder
 #
 #      The resulting wheel(s) land in ./dist/ on your host, same as running
-#      `pip wheel . -w dist/` directly would -- this just guarantees the
-#      environment it ran in.
+#      `python setup.py bdist_wheel` directly would -- this just guarantees
+#      the environment it ran in.
 #
 # The project source is intentionally NOT baked into the image (no `COPY .
 # .` here) -- it's mounted at run time so you don't have to rebuild the
@@ -66,4 +66,11 @@ RUN pip install --no-cache-dir -r build-requirements.txt
 VOLUME ["/src", "/out"]
 WORKDIR /src
 
-ENTRYPOINT ["pip", "wheel", ".", "-w", "/out"]
+# Not `pip wheel .` -- that builds in an isolated PEP 517 environment that
+# can't see the Ice wheel installed above (it would try to rebuild
+# zeroc-ice from source) and fails with "ModuleNotFoundError: No module
+# named 'build_native'" since the repo root isn't on sys.path under pip's
+# build hooks. `setup.py bdist_wheel` uses this image's environment
+# directly, the same way a non-Docker build must (see the README's
+# "Building the compiled wheel" section).
+ENTRYPOINT ["python", "setup.py", "bdist_wheel", "--dist-dir", "/out"]

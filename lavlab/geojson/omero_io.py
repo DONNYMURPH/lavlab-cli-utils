@@ -281,6 +281,9 @@ def export_image(
             if spec is not None:
                 shapes.append(spec)
         if not shapes:
+            result.warnings.append(
+                f"ROI {roi_id}: every shape was an unsupported type (see above), skipped"
+            )
             continue
 
         provenance = read_provenance(unwrap(roi.getDescription()))
@@ -293,8 +296,20 @@ def export_image(
             annotation, fallback_id=f"omero-roi-{roi_id}", unbridge=unbridge
         )
         if feature is None:
+            # Mixed shape kinds now export as a GeometryCollection (see
+            # shapes_to_geometry), so reaching here means every shape in
+            # this ROI was individually degenerate/unusable (e.g. a polygon
+            # ring under 3 points, or a polyline under 2), not that the
+            # kinds were mixed. Report exactly what was present so this is
+            # diagnosable instead of a bare "skipped".
+            kind_counts: dict[str, int] = {}
+            for s in shapes:
+                kind_counts[s.kind] = kind_counts.get(s.kind, 0) + 1
+            breakdown = ", ".join(f"{k}: {v}" for k, v in sorted(kind_counts.items()))
+            point_counts = ", ".join(str(len(s.points)) for s in shapes)
             result.warnings.append(
-                f"ROI {roi_id}: mixed shape types in one ROI, skipped"
+                f"ROI {roi_id}: no usable shapes after conversion "
+                f"({len(shapes)} shape(s) -- {breakdown}; point counts: {point_counts}), skipped"
             )
             continue
         result.features.append(feature)

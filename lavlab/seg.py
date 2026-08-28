@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Generator
@@ -38,6 +39,25 @@ def _default_seg_template_path() -> Path:
     return Path(resources.files("lavlab.data").joinpath("default_seg_template.json"))
 
 
+def _safe_path_component(text: str) -> str:
+    """Reduce free text to something safe as one filename component.
+
+    ``seg_name`` comes from a DICOM ``CodeMeaning`` -- coding scheme text
+    the file's own author doesn't control the exact spelling of, and some
+    schemes include slashes, parentheses, or other characters that would
+    otherwise land in the output path as literal separators (silently
+    creating an unintended nested directory) rather than as part of the
+    filename.
+
+    :param text: text to reduce to a safe path component
+    :type text: str
+    :return: a filesystem-safe stem
+    :rtype: str
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", text or "").strip("._-")
+    return cleaned or "segment"
+
+
 def format_output_path(output_dir: str, nii_name: str, seg_name: str) -> str:
     """Format the output path for one segment's NIfTI file.
 
@@ -50,7 +70,7 @@ def format_output_path(output_dir: str, nii_name: str, seg_name: str) -> str:
     :return: the formatted output path
     :rtype: str
     """
-    return os.path.join(output_dir, f"{nii_name}_{seg_name}.nii.gz")
+    return os.path.join(output_dir, f"{nii_name}_{_safe_path_component(seg_name)}.nii.gz")
 
 
 def read_nii(nii_path: str) -> sitk.Image:

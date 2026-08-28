@@ -18,9 +18,3 @@ environment needed on the target machine) or run directly from source.
 - **[../CONTRIBUTING.md](../CONTRIBUTING.md)** -- setting up a dev
   environment, running tests, the pattern to follow when adding a new
   command group, and the conventions this codebase expects.
-- **[handoff/](handoff/)** -- a detailed record of how the `geojson` and
-  `seg` command groups came to exist: what the repo looked like before,
-  every non-obvious decision and why, two real bugs found while testing
-  the DICOM SEG rewrite, and what's still left before this ships to the
-  lab. Read this if something looks like an odd choice and you want to
-  know whether it was deliberate.

@@ -42,6 +42,11 @@ def add_parser(subparsers) -> None:
         "--tolerance", type=int, default=DEFAULT_TOLERANCE,
         help=f"Per-channel color match tolerance (default: {DEFAULT_TOLERANCE}).",
     )
+    textvalue_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Report what would be updated (including each matched shape's ID and "
+             "label) without writing anything to OMERO.",
+    )
     add_creds_args(textvalue_parser)
     textvalue_parser.set_defaults(handler=run)
 
@@ -61,7 +66,9 @@ def _shape_color(shape):
     return r, g, b
 
 
-def _process_image(conn, image_id: int, mapping, tolerance: int) -> tuple[int, int, int]:
+def _process_image(
+    conn, image_id: int, mapping, tolerance: int, dry_run: bool = False
+) -> tuple[int, int, int]:
     image = conn.getObject("Image", image_id)
     if image is None:
         log.warning("Image %d not found, skipping.", image_id)
@@ -85,8 +92,19 @@ def _process_image(conn, image_id: int, mapping, tolerance: int) -> tuple[int, i
                 skipped_no_match += 1
                 continue
 
-            shape.setTextValue(rstring(label))
-            conn.getUpdateService().saveObject(shape)
+            shape_id = shape.getId().getValue() if shape.getId() is not None else None
+            if dry_run:
+                log.info(
+                    "Image %d: shape %s would be set to %r (color %s).",
+                    image_id, shape_id, label, rgb,
+                )
+            else:
+                shape.setTextValue(rstring(label))
+                conn.getUpdateService().saveObject(shape)
+                log.info(
+                    "Image %d: shape %s set to %r (color %s).",
+                    image_id, shape_id, label, rgb,
+                )
             updated += 1
 
     return (updated, skipped_has_comment, skipped_no_match)
@@ -110,17 +128,23 @@ def run(args: argparse.Namespace) -> None:
         if not args.image_ids:
             image_ids = list(iter_image_ids(conn, args.group))
 
+        verb = "would_update" if args.dry_run else "updated"
         total_updated = total_skip_comment = total_skip_no_match = 0
         for image_id in image_ids:
-            updated, skip_comment, skip_no_match = _process_image(conn, image_id, mapping, args.tolerance)
+            updated, skip_comment, skip_no_match = _process_image(
+                conn, image_id, mapping, args.tolerance, dry_run=args.dry_run
+            )
             total_updated += updated
             total_skip_comment += skip_comment
             total_skip_no_match += skip_no_match
-            print(f"Image {image_id}: updated={updated} had_comment={skip_comment} no_match={skip_no_match}")
+            print(f"Image {image_id}: {verb}={updated} had_comment={skip_comment} no_match={skip_no_match}")
 
+        summary_verb = "would be updated" if args.dry_run else "updated"
         print(
-            f"Done: {len(image_ids)} images, {total_updated} shapes updated, "
+            f"Done: {len(image_ids)} images, {total_updated} shapes {summary_verb}, "
             f"{total_skip_comment} already commented, {total_skip_no_match} unmatched."
         )
+        if args.dry_run:
+            print("(dry run -- no changes were written to OMERO; re-run without --dry-run to apply)")
     finally:
         conn.close()

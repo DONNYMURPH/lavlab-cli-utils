@@ -245,12 +245,20 @@ def unbridge_ring(
 ) -> tuple[list[list[float]], list[list[list[float]]]]:
     """Split a bridged ring back into an outer ring and its holes.
 
+    Consecutive duplicate points are dropped first. A dense freehand trace
+    can revisit the same rounded pixel coordinate on adjacent points --
+    most commonly right at the ring's own closing seam -- with no hole
+    intended; left in place, that redundancy is indistinguishable from a
+    genuine keyhole bridge to find_bridge(), which then treats the entire
+    rest of the ring as a "hole" and can leave the real outer ring with
+    under 3 points.
+
     :param ring: a possibly-bridged ring, closing point omitted
     :type ring: list[list[float]]
     :return: ``(outer ring, [closed hole rings])``
     :rtype: tuple[list[list[float]], list[list[list[float]]]]
     """
-    outer = list(ring)
+    outer = drop_consecutive_duplicates(list(ring))
     holes: list[list[list[float]]] = []
 
     while True:

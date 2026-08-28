@@ -7,9 +7,7 @@ metadata, and converting between DICOM SEG and NIfTI segmentation masks.
 More documentation lives in [`docs/`](docs/index.md):
 [`docs/API.md`](docs/API.md) is the exhaustive flag-by-flag CLI reference
 plus the importable Python API; [`CONTRIBUTING.md`](CONTRIBUTING.md) covers
-development conventions; [`docs/handoff/`](docs/handoff/README.md) is a
-detailed record of how the `geojson`/`seg` command groups came to exist and
-why, useful if something here looks like an odd choice.
+development conventions.
 
 ## Architecture, in brief
 
@@ -43,12 +41,28 @@ you're using:
 
 ## Install
 
-**From a built wheel** (recommended for end users):
+**From a built wheel** (recommended for end users, i.e. lab members who
+just want the `lavlab` command):
 
 ```sh
 pip install lavlab_cli_utils-<version>-<platform>.whl
 lavlab --help
 ```
+
+The wheel itself isn't published anywhere automatic -- there's no PyPI
+package and no CI wiring yet to publish one (`[tool.cibuildwheel]` in
+`pyproject.toml` is configured for a future release pipeline, not
+connected to one today). Someone with a working build environment runs
+[the build](#building-the-compiled-wheel) and hands the resulting
+`dist/*.whl` file to whoever needs it directly -- however's convenient
+(shared drive, direct transfer, attached to an internal message). It is
+**not** something to commit to this git repo: `dist/`, `build/`, and
+`lavlab/bin/` (where the compiled binary lands) are all in `.gitignore`,
+deliberately -- a ~100+ MB compiled binary has no business in git history,
+and it's a build artifact that's trivially reproducible from source
+whenever it's actually needed. Once you have the `.whl` file, `pip install`
+works exactly like installing from any other source (a local path, a URL,
+whatever fits).
 
 **From source, for development:**
 
@@ -105,9 +119,35 @@ lavlab lr batch -g 3 --workers 8 -s omero.example.edu -u you
 ```
 
 "LR" is lab shorthand for a downsampled export of a whole-slide image.
-Output filenames follow `LR${downsample}_${stem}.jp2`, where `stem` is the
-image name with everything after the *first* `.` stripped (so
-`foo.ome.tiff` -> `foo` -- this matters for OME-TIFFs specifically).
+Output filenames follow `LR${downsample}_${stem}.${format}`, where `stem`
+is the image name with everything after the *first* `.` stripped (so
+`foo.ome.tiff` -> `foo` -- this matters for OME-TIFFs specifically) and
+`format` defaults to `jp2` (`--format jpg`/`jpeg`/`png`/`tif`/`tiff` picks
+a different one).
+
+**Three tiers, tried in order, so `lr` works from any workstation -- not
+just the cluster:**
+
+1. **Cached OMERO annotation.** If a `LargeRecon.${downsample}` file
+   annotation already exists on the image in the requested format,
+   download it directly. Fast, works from anywhere.
+2. **Locally-mounted source file.** If OMERO's managed repository happens
+   to be mounted where `lr` is running (true on the cluster, not on a
+   workstation), generate the recon straight from the source file.
+3. **OMERO's tile API, over the network.** Otherwise, fetch tiles directly
+   from the server and assemble the image locally. Slower (minutes, for a
+   large slide) but works from any machine with just OMERO credentials --
+   this is what makes `lr` usable off-cluster at all.
+
+Whatever tier 2 or 3 produces gets uploaded back to OMERO under the same
+`LargeRecon.${downsample}` namespace, as `LR${downsample}_${image
+name}.${format}` -- independent of wherever `-o` points locally -- so a
+later run at the same downsample and format hits tier 1 instead of
+regenerating. Only an annotation matching the requested format is ever
+touched or replaced; an existing attachment in some other format (e.g. an
+older, manually-uploaded `.png`) is left alone. `--regenerate` skips the
+tier-1 lookup and forces a fresh tier-2/3 fetch, re-uploading the result;
+`--skip-upload` fetches without writing anything back to OMERO at all.
 
 If you don't pass `-o`, output location falls back to `fs_map` -- a YAML
 file mapping OMERO group -> filesystem destination by regex match on the
@@ -133,7 +173,11 @@ slide itself. You must pass either `--all` (every annotation) or one-or-more
 command refuses to run with neither. `--palette` swaps the RGB color mask
 for a single-channel label mask, numbered in the order your `-t` filters
 were given; it's incompatible with `--all` since there's no sane numbering
-for "everything."
+for "everything." Output format defaults to `jp2` (`--format
+jpg`/`jpeg`/`png`/`tif`/`tiff` picks a different one) -- except with
+`--palette`, which refuses to combine with `jpg`/`jpeg`: a palette mask's
+pixel values are exact integer labels (`0`, `1`, `2`, ...), and JPEG's
+lossy compression would silently corrupt them.
 
 ### `lavlab meta roi textvalue` -- backfill ROI comments from stroke color
 
@@ -150,6 +194,14 @@ currently blank, so it never overwrites something someone already typed.
 instead if needed. `--tolerance` (default 10) is the per-channel color-match
 slack, since colors don't always round-trip through OMERO's storage
 byte-for-byte.
+
+This is the one command that writes to OMERO by default. Run it with
+`--dry-run` first -- it reports exactly what would change (each matched
+shape's ID and label included) without touching anything -- especially
+since a plausible-but-wrong match is easy to get: many drawing tools
+default an unset stroke color to plain black, which is indistinguishable
+from an intentionally-black palette entry once it's in OMERO. Spot-check a
+few matched shape IDs in OMERO.web before re-running without the flag.
 
 ### `lavlab geojson import` / `export` -- QuPath GeoJSON <-> OMERO ROIs
 
@@ -171,7 +223,20 @@ lose data if you're not careful:
   which renders correctly as a hole under the standard nonzero fill rule
   (`lavlab/geojson/geometry.py`'s `bridge_hole`). `export` reverses this
   automatically (`unbridge_ring`); `--keep-bridges` turns that off if you
-  specifically want the raw bridged shape back.
+  specifically want the raw bridged shape back. Detecting a genuine bridge
+  vs. an ordinary duplicate point (e.g. a dense freehand trace revisiting
+  the same rounded pixel at its own closing seam) is the fiddly part --
+  `unbridge_ring` drops consecutive duplicate points before looking for a
+  bridge, specifically so a shape like that doesn't get misread as "one
+  giant hole" and silently dropped for having under 3 points left.
+- **Mixed shape kinds in one ROI.** An OMERO ROI can hold shapes of
+  different kinds together -- a Polygon and a Point, say -- but a plain
+  GeoJSON geometry can only be one type. `export` falls back to a
+  `GeometryCollection` feature for those ROIs instead of dropping them;
+  `import` reads `GeometryCollection`, `Point`/`MultiPoint`, and
+  `LineString`/`MultiLineString` features right back into the matching
+  shape kinds (not just `Polygon`/`MultiPolygon`), so nothing that a
+  from-scratch export can produce fails to come back on import.
 - **Coordinate precision.** Whole-slide coordinates are large enough that
   naive `%g` formatting would silently round to 6 significant digits --
   on a slide past ~100,000px that's more than a pixel of drift on the
@@ -235,8 +300,16 @@ adding to this codebase.
 
 ```sh
 pip install -r build-requirements.txt   # + the Ice wheel for omero-py, see that file's comment
-pip wheel . -w dist/
+python setup.py bdist_wheel
 ```
+
+**Use `setup.py bdist_wheel` directly, not `pip wheel .`.** `pip wheel`
+builds in an isolated PEP 517 environment that (a) can't see the
+manually-installed Ice wheel and tries to rebuild `zeroc-ice` from source
+instead, and (b) fails with `ModuleNotFoundError: No module named
+'build_native'`, since the repo root isn't on `sys.path` under pip's build
+hooks even with `--no-build-isolation`. Running `setup.py` directly puts
+its own directory on the path and uses the environment you already set up.
 
 This shells out to Nuitka (`setup.py`'s `build_py` override, or run
 `build_native.py` standalone if you just want the compiled binary without
@@ -245,8 +318,9 @@ executable, bundled into the wheel as `lavlab/bin/lavlab-bin`; the
 `lavlab` console-script just execs it. `[tool.cibuildwheel]` in
 `pyproject.toml` is already configured to build this for
 `linux-x86_64`/`macos-arm64` across `cp310`-`cp314` (Windows and
-musllinux are skipped) -- see `docs/handoff/07-next-steps.md` for wiring
-this into actual CI.
+musllinux are skipped), but isn't wired into any CI yet -- see
+[Install](#install) above for how a wheel actually gets to a lab member
+today.
 
 **Both `setup.py` and `build_native.py` include a fixed set of extra
 `--include-module=`/`--include-package-data=` flags for `pydicom`**
@@ -324,8 +398,10 @@ etc.) as a second line of defense.
   writes -- SimpleITK/GDCM doesn't support parsing it directly yet, even
   though `highdicom` (which `lavlab seg dcm2nii` uses) reads it fine. This
   doesn't affect `lavlab seg dcm2nii`'s own output, which works around it
-  automatically (see `docs/handoff/05-bugs-found-and-fixed.md` for the
-  detail) -- it only matters if you're trying to open the file with some
-  *other* tool that goes through SimpleITK.
+  automatically (`dcmseg_to_nifti` falls back to the reference NIfTI's
+  geometry when `sitk.ReadImage` can't read a `LABELMAP` SEG's directly --
+  see the `try`/`except RuntimeError` in `lavlab/seg.py`) -- it only
+  matters if you're trying to open the file with some *other* tool that
+  goes through SimpleITK.
 - **`pip install -e ".[dev]"` fails on `omero-py`.** You need the Ice
   wheel installed first -- see the Install section above.

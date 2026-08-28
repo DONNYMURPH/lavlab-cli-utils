@@ -3,7 +3,7 @@ logic, no OMERO required.
 
 Covers the subject_glob mechanism and the bundled default_fs_map.yaml's
 HE / other-stain / biopsy entries, ported from legacy/batch_lr.py's
-proven path resolution logic (see docs/handoff/10-lr-fix-notes.md).
+proven path resolution logic.
 """
 
 from __future__ import annotations

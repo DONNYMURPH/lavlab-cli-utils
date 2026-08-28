@@ -49,15 +49,37 @@ def add_parser(subparsers) -> None:
         "--palette", action="store_true",
         help="Emit a single-channel label mask ordered by --text-filter instead of an RGB color mask.",
     )
+    parser.add_argument(
+        "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
+        help="Output format when the filename isn't fixed by an explicit -o path "
+             "(default: jp2). Not compatible with --palette, since jpg/jpeg's lossy "
+             "compression would corrupt exact label values.",
+    )
     add_common_output_args(parser)
     add_creds_args(parser)
     parser.set_defaults(handler=run)
+
+
+def _is_lossy_format(args: argparse.Namespace) -> bool:
+    # An explicit -o file extension overrides --format (same precedence
+    # write_recon() itself uses), so check that first.
+    if args.output and not os.path.isdir(args.output):
+        ext = os.path.splitext(args.output)[1].lstrip(".").lower()
+        if ext:
+            return ext in ("jpg", "jpeg")
+    return args.format in ("jpg", "jpeg")
 
 
 def _validate_selection(args: argparse.Namespace) -> None:
     if args.all and args.palette:
         raise SystemExit(
             "error: --all is not supported with --palette; manually define --text-filter values instead."
+        )
+    if args.palette and _is_lossy_format(args):
+        raise SystemExit(
+            "error: --palette produces exact label values (0, 1, 2, ...) that jpg/jpeg's "
+            "lossy compression would corrupt; use --format jp2/png/tif (or an -o path with "
+            "one of those extensions) instead."
         )
     if not args.all and not args.text_filter:
         raise SystemExit("error: specify --all or at least one --text-filter value.")
@@ -101,7 +123,7 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         try:
             output_path = resolve_output_path(
                 args.output, fs_map, group_id, name, args.downsample,
-                suffix=args.suffix, ext="jp2", batch=False,
+                suffix=args.suffix, ext=args.format, batch=False,
             )
         except ConfigError as exc:
             raise SystemExit(f"error: {exc}")
@@ -151,7 +173,7 @@ def _process_one(image_id: int):
 
             output_path = resolve_output_path(
                 args.output, fs_map, group_id, name, args.downsample,
-                suffix=args.suffix, ext="jp2", batch=True,
+                suffix=args.suffix, ext=args.format, batch=True,
             )
             if output_path is None:
                 log.warning("Image %d: no usable output directory, skipping.", image_id)

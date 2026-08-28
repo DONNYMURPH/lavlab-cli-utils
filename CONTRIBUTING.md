@@ -39,11 +39,10 @@ GeoJSON code.
 If you touch `lavlab/seg.py`, run the tests with the real imaging stack
 installed and pay attention to
 `test_nifti_to_dcmseg_round_trips_through_dcmseg_to_nifti` specifically --
-this module has already had two real bugs (see
-`docs/handoff/05-bugs-found-and-fixed.md`) that only a real round-trip
-test caught, not unit tests of individual functions. If you change
-anything in the DICOM SEG read/write path, re-verify the round trip still
-holds, don't just check that the function you touched doesn't raise.
+this module has already had real bugs that only a real round-trip test
+caught, not unit tests of individual functions. If you change anything in
+the DICOM SEG read/write path, re-verify the round trip still holds, don't
+just check that the function you touched doesn't raise.
 
 ## The command-group pattern
 
@@ -72,9 +71,8 @@ a template rather than inventing a new structure:
    `add_parser(subparsers)` in `build_parser()`.
 4. If the command talks to OMERO, use `lavlab/commands/_shared.py`'s
    `add_creds_args`/`connect_from_args` -- don't invent another
-   `--server`/`--user`/`--password` flag set. This has already been
-   consolidated once (see `docs/handoff/04-key-decisions.md`, item 4);
-   don't reintroduce the split.
+   `--server`/`--user`/`--password` flag set. Every OMERO-facing command
+   group already shares this; don't reintroduce a split.
 
 ## Conventions to follow
 
@@ -123,14 +121,16 @@ actually ships in the wheel.
 - `pytest` passes.
 - If you touched anything OMERO-facing, you've actually run it against a
   real (or at least a test) OMERO server -- argparse wiring correctness is
-  not the same as the command working. This project's own history has one
-  documented gap here (`docs/handoff/06-testing-and-verification.md` notes
-  `geojson`/`lr`/`roi`/`meta` were only ever verified with stubbed OMERO
-  imports during one session) -- don't add to that gap.
+  not the same as the command working, and unit tests built on fakes are
+  not a substitute either: real production data has surfaced genuine bugs
+  in this codebase (a matplotlib-gated skimage function that crashed on
+  any Rectangle ROI, a false-positive hole detector that silently dropped
+  a whole ROI on export) that no amount of fake-based unit testing would
+  have caught. Don't skip the live check.
 - If you touched the Nuitka build (`setup.py`, `build_native.py`,
   `Dockerfile`), actually run a build and smoke-test the resulting binary
   (`lavlab --help` and the specific subcommand you touched), not just read
   the change and reason it should work. Compiled-binary failures are
-  frequently invisible from source review alone -- see
-  `docs/handoff/05-bugs-found-and-fixed.md` for what "actually run it"
-  caught that code review didn't.
+  frequently invisible from source review alone -- see the pydicom
+  example under the README's "Building the compiled wheel" section for
+  what that class of failure looks like.

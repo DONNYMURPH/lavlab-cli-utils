@@ -56,3 +56,19 @@ def test_unbridge_ring_with_no_hole_is_unchanged():
     outer, holes = unbridge_ring(ring)
     assert outer == ring
     assert holes == []
+
+
+def test_unbridge_ring_ignores_consecutive_duplicate_seam_points():
+    # A real production ROI (image 362, ROI 68078) hit this: its closing
+    # point was redundantly repeated at both the start and end of the
+    # ring (a digitization artifact, not a hole). find_bridge() used to
+    # match on that redundant seam and treat the entire rest of the ring
+    # as a bridged-out "hole", leaving the real outer ring with under 3
+    # points -- silently dropping the whole shape on export.
+    seam = [0, 0]
+    ring = [seam, seam, [10, 0], [10, 10], [0, 10], [5, 10], seam, seam, seam]
+    outer, holes = unbridge_ring(ring)
+
+    assert holes == []
+    assert len(outer) >= 3
+    assert set(map(tuple, outer)) == {(0, 0), (10, 0), (10, 10), (0, 10), (5, 10)}

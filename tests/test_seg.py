@@ -1,6 +1,8 @@
 """Tests for lavlab.seg -- skipped if the heavy imaging deps aren't installed
 (they're in the `dev` extra, not required just to import the rest of the package)."""
 
+import os
+
 import numpy as np
 import pytest
 
@@ -113,6 +115,21 @@ def test_nifti_to_dcmseg_round_trips_through_dcmseg_to_nifti(tmp_path):
 def test_format_output_path():
     path = format_output_path("/out", "case01", "Prostate")
     assert path == "/out/case01_Prostate.nii.gz"
+
+
+def test_format_output_path_sanitizes_unsafe_segment_name():
+    # A DICOM CodeMeaning can contain slashes/parens/etc.; those must not
+    # land in the path as literal separators (an unintended nested dir)
+    # or otherwise break the write.
+    path = format_output_path("/out", "case01", "Gleason 3+4=7 (prostate/left)")
+    assert "/" not in os.path.relpath(path, "/out")
+    assert path.startswith("/out/case01_")
+    assert path.endswith(".nii.gz")
+
+
+def test_format_output_path_empty_segment_name_falls_back():
+    path = format_output_path("/out", "case01", "///")
+    assert path == "/out/case01_segment.nii.gz"
 
 
 def test_get_affine_from_sitk_identity():
