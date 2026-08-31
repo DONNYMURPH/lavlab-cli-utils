@@ -49,10 +49,7 @@ pip install lavlab_cli_utils-<version>-<platform>.whl
 lavlab --help
 ```
 
-The wheel itself isn't published anywhere automatic -- there's no PyPI
-package and no CI wiring yet to publish one (`[tool.cibuildwheel]` in
-`pyproject.toml` is configured for a future release pipeline, not
-connected to one today). Someone with a working build environment runs
+The wheel itself isn't published anywhere automatic -- Someone with a working build environment runs
 [the build](#building-the-compiled-wheel) and hands the resulting
 `dist/*.whl` file to whoever needs it directly -- however's convenient
 (shared drive, direct transfer, attached to an internal message). It is
@@ -369,20 +366,6 @@ environment it ran in. See the comments at the top of `Dockerfile` for
 more detail. `.dockerignore` excludes `legacy/` from the build context for
 the same reason `.gitignore` does (see below) -- nothing in there should
 ever leave your machine.
-
-## `legacy/` and secrets
-
-`legacy/` holds the ad-hoc scripts and notebooks the `lavlab` CLI was
-built from, kept for reference (see `legacy/README.md` for what maps to
-what). **It is git-ignored and docker-ignored on purpose, not by
-oversight** -- some notebook outputs in there contain a real OMERO
-username and the real server hostname from having actually been run
-against the lab server. Don't add new files to `legacy/`, don't remove it
-from `.gitignore`/`.dockerignore`, and if you're ever unsure whether
-something contains a real credential or real lab data before committing
-it, err on the side of not committing it. `.gitignore` also excludes
-common secret-file patterns (`.env`, `*.pem`, `*.key`, `credentials*.json`,
-etc.) as a second line of defense.
 
 ## Troubleshooting
 

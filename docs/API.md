@@ -2,10 +2,7 @@
 
 Two halves: the **CLI** (what you get from `lavlab ...` / `python -m lavlab
 ...`) and the **Python API** (what you get importing `lavlab.geojson` /
-`lavlab.seg` directly, e.g. from a notebook). Every command/function here
-is exhaustive as of this doc's writing -- if it drifts from the actual
-`add_parser()` definitions in `lavlab/commands/*.py`, those source files
-are the ground truth, not this page.
+`lavlab.seg` directly, e.g. from a notebook).
 
 ---
 

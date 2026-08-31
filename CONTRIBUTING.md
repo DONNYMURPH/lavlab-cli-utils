@@ -1,8 +1,5 @@
 # Contributing to lavlab-cli-utils
 
-This is an internal lab toolkit, not a public open-source project, but the
-same discipline still pays off: consistent patterns mean anyone in the lab
-can pick up any command group and know where things live.
 
 ## Setting up a dev environment
 
@@ -100,13 +97,6 @@ a template rather than inventing a new structure:
   (see the comment above `PYDICOM_NUITKA_FLAGS` in `build_native.py` for
   an example -- it exists precisely so nobody strips those flags thinking
   they're dead weight).
-- **`legacy/` is reference-only.** It's git-ignored (see `.gitignore`) and
-  some of its notebook outputs contain real OMERO usernames/hostnames from
-  having actually been run against the lab server. Never add new files to
-  it, never remove it from `.gitignore`/`.dockerignore`, and don't treat
-  anything in it as a source of truth for current behavior -- if it's
-  still useful, its logic should already have a `lavlab/` counterpart (see
-  `legacy/README.md` for the mapping); if not, it's just history.
 
 ## Adding a new bundled default (fs_map, seg template, ...)
 
