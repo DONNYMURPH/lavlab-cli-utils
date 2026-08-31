@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """OMERO connection helpers.
 
 Per the design: object lookups use the "dummy" group (-1) so objects are

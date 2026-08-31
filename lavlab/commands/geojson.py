@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab geojson`` -- move QuPath GeoJSON annotations in and out of OMERO.
 
     lavlab geojson import slide.geojson --image 1 -u you -s omero

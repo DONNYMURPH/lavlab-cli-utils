@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab meta roi textvalue`` -- fill in blank ROI shape comments by
 matching each shape's stroke color against a palette."""
 

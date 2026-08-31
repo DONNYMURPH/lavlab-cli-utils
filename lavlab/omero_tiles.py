@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Generate a downsampled image purely over OMERO's tile API.
 """
 

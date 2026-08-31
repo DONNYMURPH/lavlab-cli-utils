@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Shared helpers for the ``lr`` and ``roi`` command groups."""
 
 from __future__ import annotations

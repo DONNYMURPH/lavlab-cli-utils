@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Build the standalone Nuitka executable with OMERO's dynamic Ice modules."""
 
 from __future__ import annotations

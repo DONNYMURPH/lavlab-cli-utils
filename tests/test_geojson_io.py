@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Tests for lavlab.geojson.geojson_io -- pure-Python, no OMERO required."""
 
 import json

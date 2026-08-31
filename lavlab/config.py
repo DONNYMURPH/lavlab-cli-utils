@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Credential resolution and fs_map (filesystem mapping) configuration.
 
 fs_map is an optional YAML file describing, per-OMERO-group, where output

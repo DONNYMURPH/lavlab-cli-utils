@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Color-to-text-label palettes used by ``lavlab meta roi textvalue``.
 
 A palette maps an (r, g, b) tuple to a label. Palettes can be a built-in

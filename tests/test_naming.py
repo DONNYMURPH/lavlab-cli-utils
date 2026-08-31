@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Tests for lavlab.naming's fs_map resolution -- pure filesystem/regex
 logic, no OMERO required.
 

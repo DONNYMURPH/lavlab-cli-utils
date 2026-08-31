@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab lr`` -- pull large-recon (downsampled) images from OMERO."""
 
 from __future__ import annotations

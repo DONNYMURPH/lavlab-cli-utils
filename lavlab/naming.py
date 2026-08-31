@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Output filename/path resolution.
 
 Naming convention: ``LR${DOWNSAMPLE}_${FILENAME}(_${SUFFIX}).${EXT}``, where

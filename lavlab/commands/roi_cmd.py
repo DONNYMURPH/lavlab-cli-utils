@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab roi`` -- pull ROI mask images (RGB color mask or single-channel
 palette) from OMERO."""
 

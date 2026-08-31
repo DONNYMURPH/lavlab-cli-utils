@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """ROI shape gathering and rasterization into either an RGB color mask or a
 single-channel palette (label) mask.
 

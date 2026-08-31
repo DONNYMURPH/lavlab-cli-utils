@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Tests for lavlab.omero_asyncio -- pure asyncio logic, no Ice/OMERO required.
 
 Wraps a fake object exposing Ice's begin_f/end_f/f convention and confirms

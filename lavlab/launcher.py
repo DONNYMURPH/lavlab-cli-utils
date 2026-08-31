@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Execute the bundled native lavlab binary without importing runtime packages."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab seg`` -- convert between DICOM SEG and NIfTI segmentation masks.
 
 Local file conversion only; neither direction talks to OMERO.

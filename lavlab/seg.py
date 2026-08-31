@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Convert between DICOM SEG and NIfTI segmentation masks.
 
 Two independent directions live here:

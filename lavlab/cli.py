@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """``lavlab`` CLI entry point.
 
 Single-file entry point suitable for a Nuitka --onefile build:

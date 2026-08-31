@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Tests for lavlab.seg -- skipped if the heavy imaging deps aren't installed
 (they're in the `dev` extra, not required just to import the rest of the package)."""
 

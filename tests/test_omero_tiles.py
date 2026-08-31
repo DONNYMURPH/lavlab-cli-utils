@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Tests for lavlab.omero_tiles -- skipped if pyvips isn't installed (it's
 in the `dev` extra, not required just to import the rest of the package).
 

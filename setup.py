@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Build the dependency-free wheel containing the Nuitka executable."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """Generic image loading/downsampling for OMERO-managed image files on disk."""
 
 from __future__ import annotations
