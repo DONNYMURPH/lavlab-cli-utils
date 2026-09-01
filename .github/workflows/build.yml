@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     runs-on: macos-14   # Apple Silicon runner -- must match the arm64 target
+    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files)
 
     strategy:
       fail-fast: false   # if 3.11 fails, still try 3.12 (and vice versa)
@@ -29,17 +30,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Download zeroc-ice wheel from Glencoe
+        # -O keeps the original filename; pip rejects renamed wheels because it
+        # parses metadata out of the filename itself.
         run: |
-          curl -fL -o ice.whl \
+          curl -fL -O \
             "https://github.com/glencoesoftware/zeroc-ice-py-macos-universal2/releases/download/${ICE_RELEASE_TAG}/${{ matrix.ice-wheel }}"
-          ls -lh ice.whl
+          ls -lh ${{ matrix.ice-wheel }}
         env:
           ICE_RELEASE_TAG: "20240131"
 
       - name: Install zeroc-ice and omero-py
         run: |
           python -m pip install --upgrade pip
-          pip install ice.whl
+          pip install ${{ matrix.ice-wheel }}
           pip install omero-py==5.21.0
           python -c "import omero.gateway, Ice; print('Ice', Ice.stringVersion())"
 
