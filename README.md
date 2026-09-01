@@ -51,13 +51,7 @@ lavlab --help
 
 The wheel itself isn't published anywhere automatic -- Someone with a working build environment runs
 [the build](#building-the-compiled-wheel) and hands the resulting
-`dist/*.whl` file to whoever needs it directly -- however's convenient
-(shared drive, direct transfer, attached to an internal message). It is
-**not** something to commit to this git repo: `dist/`, `build/`, and
-`lavlab/bin/` (where the compiled binary lands) are all in `.gitignore`,
-deliberately -- a ~100+ MB compiled binary has no business in git history,
-and it's a build artifact that's trivially reproducible from source
-whenever it's actually needed. Once you have the `.whl` file, `pip install`
+`dist/*.whl` file to whoever needs it directly. Once you have the `.whl` file, `pip install`
 works exactly like installing from any other source (a local path, a URL,
 whatever fits).
 
