@@ -41,7 +41,7 @@ jobs:
 
       - name: Install zeroc-ice and omero-py
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           pip install ${{ matrix.ice-wheel }}
           pip install omero-py==5.21.0
           python -c "import omero.gateway, Ice; print('Ice', Ice.stringVersion())"
