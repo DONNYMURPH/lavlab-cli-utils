@@ -9,7 +9,6 @@ __pycache__/
 
 # Build artifacts
 build/
-dist/
 native/
 wheelhouse/
 lavlab/bin/
