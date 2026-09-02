@@ -29,7 +29,7 @@ lavlab/
 The package is built to run two different ways, and it matters which one
 you're using:
 
-- **Compiled binary** (what a lab member installing a wheel gets): the
+- **Compiled binary** (what us lab members are designed to do): the
   `lavlab` console-script just `os.execv`s a self-contained native
   executable (`lavlab/launcher.py` -> `lavlab/bin/lavlab-bin`), compiled
   ahead of time with [Nuitka](https://nuitka.net). No Python environment,
@@ -38,6 +38,9 @@ you're using:
   Python CLI directly (`lavlab/__main__.py` -> `lavlab/cli.py`). This is
   what you use while developing, and it needs the full dependency stack
   installed (see below) since nothing is precompiled.
+- **BIN** (this uses no python at all as otherwise you use pip): There is also a bin
+  that is an executibale which all you do is use that bin and it executes the commands
+  witout python env.
 
 ## Install
 
@@ -49,11 +52,9 @@ pip install lavlab_cli_utils-<version>-<platform>.whl
 lavlab --help
 ```
 
-The wheel itself isn't published anywhere automatic -- Someone with a working build environment runs
-[the build](#building-the-compiled-wheel) and hands the resulting
-`dist/*.whl` file to whoever needs it directly. Once you have the `.whl` file, `pip install`
-works exactly like installing from any other source (a local path, a URL,
-whatever fits).
+The wheel at the moment can be found in dist and the file is there. Or
+in the actions menu there are builds there that are automatically made 
+through github.
 
 **From source, for development:**
 
