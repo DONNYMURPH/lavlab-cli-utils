@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: macos-14   # Apple Silicon runner -- must match the arm64 target
-    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files, cold cache)
+    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files)
 
     strategy:
       fail-fast: false   # if 3.11 fails, still try 3.12 (and vice versa)
@@ -28,6 +28,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Restore Nuitka ccache
+        # A cold cache costs ~60 minutes of C compilation; a warm one is far
+        # faster. Keyed so a changed build config starts fresh, but ordinary
+        # source edits still reuse the cache.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Nuitka
+            ~/.cache/ccache
+          key: nuitka-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('build-requirements.txt', 'build_native.py', 'setup.py') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-py${{ matrix.python-version }}-
 
       - name: Download zeroc-ice wheel from Glencoe
         # -O keeps the original filename; pip rejects renamed wheels because it
