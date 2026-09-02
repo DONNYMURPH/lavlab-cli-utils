@@ -155,9 +155,17 @@ def fetch_large_recon(
                 "Image %d: found cached .%s large-recon (namespace %s); downloading...",
                 image_id, ext, namespace,
             )
-            _download_annotation(ann, output_path)
-            log.info("Image %d: downloaded cached recon to %s.", image_id, output_path)
-            return "annotation"
+            try:
+                _download_annotation(ann, output_path)
+            except Exception:
+                log.warning(
+                    "Image %d: cached .%s recon could not be downloaded; "
+                    "falling back to regeneration.",
+                    image_id, ext, exc_info=True,
+                )
+            else:
+                log.info("Image %d: downloaded cached recon to %s.", image_id, output_path)
+                return "annotation"
 
     src_path = get_source_file_path(conn, image_id)
     if src_path is not None and os.path.exists(src_path):

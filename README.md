@@ -53,7 +53,7 @@ lavlab --help
 ```
 
 The wheel at the moment can be found in dist and the file is there. Or
-in the actions menu there are builds there that are automatically made 
+in the actions menu there are builds there that are automatically made
 through github.
 
 **From source, for development:**

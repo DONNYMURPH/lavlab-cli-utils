@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import multiprocessing
 import os
+import tempfile
 
 from lavlab.commands._shared import (
     add_common_output_args,
@@ -43,6 +45,12 @@ def add_parser(subparsers) -> None:
         help="Don't upload the generated large-recon back to OMERO as an annotation.",
     )
     parser.add_argument(
+        "--skip-local", action="store_true",
+        help="Don't keep a local copy -- fetch/generate to a temporary file, upload it to "
+             "OMERO, then delete it. Incompatible with -o and with --skip-upload (that "
+             "combination would do nothing).",
+    )
+    parser.add_argument(
         "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
         help="Output format when the filename isn't fixed by an explicit -o path "
              "(default: jp2). Also selects which format is searched for/uploaded as "
@@ -53,7 +61,27 @@ def add_parser(subparsers) -> None:
     parser.set_defaults(handler=run)
 
 
+def _validate_args(args: argparse.Namespace) -> None:
+    if args.skip_local and args.skip_upload:
+        raise SystemExit(
+            "error: --skip-local and --skip-upload together would fetch/generate an "
+            "image and then discard it -- drop one or the other."
+        )
+    if args.skip_local and args.output:
+        raise SystemExit(
+            "error: --skip-local doesn't write anywhere, so -o has nothing to do; "
+            "drop one or the other."
+        )
+
+
+def _make_temp_path(fmt: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=f".{fmt}")
+    os.close(fd)
+    return path
+
+
 def run(args: argparse.Namespace) -> None:
+    _validate_args(args)
     target = parse_target(args.target)
     if target == "batch":
         _run_batch(args)
@@ -77,20 +105,29 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         group_id = group_of(conn, image)
         name = image.getName()
 
-        fs_map = load_fs_map_from_args(args)
+        if args.skip_local:
+            output_path = _make_temp_path(args.format)
+        else:
+            fs_map = load_fs_map_from_args(args)
+            try:
+                output_path = resolve_output_path(
+                    args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=False
+                )
+            except ConfigError as exc:
+                raise SystemExit(f"error: {exc}")
+
+            if os.path.exists(output_path) and not args.override:
+                print(f"Already exists, skipping (use --override to replace): {output_path}")
+                return
+
         try:
-            output_path = resolve_output_path(
-                args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=False
-            )
-        except ConfigError as exc:
-            raise SystemExit(f"error: {exc}")
-
-        if os.path.exists(output_path) and not args.override:
-            print(f"Already exists, skipping (use --override to replace): {output_path}")
-            return
-
-        _render_and_write(conn, image, args, output_path)
-        print(f"Completed image {image_id}: {output_path}")
+            _render_and_write(conn, image, args, output_path)
+            shown = "uploaded to OMERO (not stored locally)" if args.skip_local else output_path
+            print(f"Completed image {image_id}: {shown}")
+        finally:
+            if args.skip_local:
+                with contextlib.suppress(OSError):
+                    os.remove(output_path)
     finally:
         conn.close()
 
@@ -124,23 +161,31 @@ def _process_one(image_id: int):
             if image is None:
                 log.warning("Image %d not found, skipping.", image_id)
                 return None
-
-            group_id = args.group if args.group is not None else group_of(conn, image)
+            group_id = group_of(conn, image)
             name = image.getName()
 
-            output_path = resolve_output_path(
-                args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=True
-            )
-            if output_path is None:
-                log.warning("Image %d: no usable output directory, skipping.", image_id)
-                return None
+            if args.skip_local:
+                output_path = _make_temp_path(args.format)
+            else:
+                output_path = resolve_output_path(
+                    args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=True
+                )
+                if output_path is None:
+                    log.warning("Image %d: no usable output directory, skipping.", image_id)
+                    return None
 
-            if os.path.exists(output_path) and not args.override:
-                return (image_id, output_path)
+                if os.path.exists(output_path) and not args.override:
+                    return (image_id, output_path)
 
-            _render_and_write(conn, image, args, output_path)
-            print(f"Completed image {image_id}: {output_path}")
-            return (image_id, output_path)
+            try:
+                _render_and_write(conn, image, args, output_path)
+                shown = "uploaded to OMERO (not stored locally)" if args.skip_local else output_path
+                print(f"Completed image {image_id}: {shown}")
+                return (image_id, None if args.skip_local else output_path)
+            finally:
+                if args.skip_local:
+                    with contextlib.suppress(OSError):
+                        os.remove(output_path)
         except ConfigError:
             raise
         except Exception as exc:
@@ -155,16 +200,17 @@ def _process_one(image_id: int):
 
 def _run_batch(args: argparse.Namespace) -> None:
     fs_map = load_fs_map_from_args(args)
-    conn = connect_from_args(args)
-    try:
-        image_ids = list(iter_image_ids(conn, args.group))
-    finally:
-        conn.close()
-
-    log.info("Found %d images. Starting %d workers.", len(image_ids), args.workers)
+    log.info("Starting %d workers.", args.workers)
 
     ctx = multiprocessing.get_context("fork")
     with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args, fs_map)) as pool:
+        conn = connect_from_args(args)
+        try:
+            image_ids = list(iter_image_ids(conn, args.group))
+        finally:
+            conn.close()
+
+        log.info("Found %d images.", len(image_ids))
         results = list(pool.imap_unordered(_process_one, image_ids))
 
     completed = [r for r in results if r is not None]

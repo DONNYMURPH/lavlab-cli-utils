@@ -171,7 +171,14 @@ def _process_one(image_id: int):
                 log.warning("Image %d not found, skipping.", image_id)
                 return None
 
-            group_id = args.group if args.group is not None else group_of(conn, image)
+            # Always switch the connection into the image's own group --
+            # args.group only scopes which images iter_image_ids() listed,
+            # it doesn't substitute for group_of()'s side effect of
+            # setting SERVICE_OPTS. roi never writes to OMERO today so
+            # this hasn't been observed to fail here the way it did in
+            # lr.py's upload, but the same latent mismatch exists -- see
+            # the identical fix/comment in lavlab/commands/lr.py.
+            group_id = group_of(conn, image)
             name = image.getName()
 
             output_path = resolve_output_path(
@@ -204,17 +211,28 @@ def _process_one(image_id: int):
 
 
 def _run_batch(args: argparse.Namespace) -> None:
+    # Fork the worker pool before this (parent) process ever touches
+    # OMERO/Ice -- see the identical comment in lavlab/commands/lr.py's
+    # _run_batch for the confirmed root cause (fork() after any Ice usage
+    # in the forking process, even a closed connection, breaks every
+    # child's own subsequent Ice usage -- source retries-and-fails,
+    # compiled Nuitka onefile segfaults). Fork first, while this process
+    # is still Ice-virgin; the parent's own connection below (to list
+    # image_ids) and each worker's _init_worker() connection (post-fork,
+    # in-process) are both then a process's first-ever Ice usage -- the
+    # confirmed-safe case.
     fs_map = load_fs_map_from_args(args)
-    conn = connect_from_args(args)
-    try:
-        image_ids = list(iter_image_ids(conn, args.group))
-    finally:
-        conn.close()
-
-    log.info("Found %d images. Starting %d workers.", len(image_ids), args.workers)
+    log.info("Starting %d workers.", args.workers)
 
     ctx = multiprocessing.get_context("fork")
     with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args, fs_map)) as pool:
+        conn = connect_from_args(args)
+        try:
+            image_ids = list(iter_image_ids(conn, args.group))
+        finally:
+            conn.close()
+
+        log.info("Found %d images.", len(image_ids))
         results = list(pool.imap_unordered(_process_one, image_ids))
 
     completed = [r for r in results if r is not None]
