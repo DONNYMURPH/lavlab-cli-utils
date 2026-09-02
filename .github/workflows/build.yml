@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: macos-14   # Apple Silicon runner -- must match the arm64 target
-    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files)
+    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files, cold cache)
 
     strategy:
       fail-fast: false   # if 3.11 fails, still try 3.12 (and vice versa)
@@ -60,7 +60,15 @@ jobs:
         run: python setup.py bdist_wheel
 
       - name: Show what was built
-        run: ls -lh dist/
+        run: ls -lh dist/ lavlab/bin/
+
+      - name: Stage the standalone binary
+        # Both matrix jobs produce a file called `lavlab-bin`, so give each a
+        # distinct name or they collide as release assets.
+        run: |
+          cp lavlab/bin/lavlab-bin \
+             dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
+          ls -lh dist/
 
       - name: Smoke test the wheel in a clean virtualenv
         # Install into an environment with nothing else in it -- this is the
@@ -75,6 +83,12 @@ jobs:
           /tmp/lavlab-smoke/bin/lavlab seg --help
           /tmp/lavlab-smoke/bin/lavlab meta --help
 
+      - name: Smoke test the standalone binary directly
+        # No venv, no pip -- just run the compiled artifact on its own.
+        run: |
+          chmod +x dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
+          ./dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }} --help
+
       - name: Upload wheel as a build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -82,9 +96,18 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-      - name: Attach wheel to the GitHub Release
+      - name: Upload standalone binary as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavlab-bin-py${{ matrix.python-version }}
+          path: dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
+          if-no-files-found: error
+
+      - name: Attach wheel and binary to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.whl
+          files: |
+            dist/*.whl
+            dist/lavlab-bin-macos-arm64-py*
           fail_on_unmatched_files: true
