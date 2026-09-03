@@ -420,3 +420,49 @@ def test_upload_mask_replaces_only_the_same_mask(tmp_path):
 
     assert image.removed == [stale]
     assert conn.deleted == [stale._obj]
+
+
+def test_roi_and_lr_annotations_do_not_collide():
+    """roi masks and lr recons share a namespace *prefix* but not a
+    namespace -- OMERO filters by exact ns equality, so neither command's
+    lookup can pick up the other's attachment. lr matches on extension
+    alone, so the namespace is its only protection; this pins that down."""
+    from lavlab.large_recon import has_cached_recon
+
+    class _F:
+        def __init__(self, name):
+            self._name = name
+
+        def getName(self):
+            return self._name
+
+    class _Ann:
+        def __init__(self, name, ns):
+            self._f = _F(name)
+            self.ns = ns
+            self._obj = object()
+
+        def getFile(self):
+            return self._f
+
+    class _Image:
+        # mirrors omero.gateway's real filter: exact ns equality
+        def __init__(self, anns):
+            self._anns = anns
+
+        def getName(self):
+            return "N101_S06_HE.ome.tiff"
+
+        def listAnnotations(self, ns=None):
+            return [a for a in self._anns if ns is None or a.ns == ns]
+
+    lr_ann = _Ann("LR10_N101_S06_HE.jp2", "LargeRecon.10")
+    roi_ann = _Ann("LR10_N101_S06_HE__annot.jp2", "LargeRecon.10.roi")
+
+    both = _Image([lr_ann, roi_ann])
+    assert has_cached_recon(both, 10, "jp2") is True
+    assert roi_mod.has_uploaded_mask(both, 10, "_annot", "jp2") is True
+
+    # Neither may fall back to the other's attachment when its own is absent.
+    assert has_cached_recon(_Image([roi_ann]), 10, "jp2") is False
+    assert roi_mod.has_uploaded_mask(_Image([lr_ann]), 10, "_annot", "jp2") is False

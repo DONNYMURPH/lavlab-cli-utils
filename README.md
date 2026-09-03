@@ -141,6 +141,26 @@ older, manually-uploaded `.png`) is left alone. `--regenerate` skips the
 tier-1 lookup and forces a fresh tier-2/3 fetch, re-uploading the result;
 `--skip-upload` fetches without writing anything back to OMERO at all.
 
+Two more flags exist for running this across a whole group:
+
+- **`--skip-existing`** skips any image that already has a recon for this
+  downsample and format, on one cheap "does this annotation exist" check --
+  no download, no regeneration. Cached images cost almost nothing, only the
+  missing ones do real work. Contradicts `--regenerate`, so those two are
+  rejected together.
+- **`--skip-local`** keeps no local copy: it fetches/generates to a
+  temporary file, uploads that, then deletes it. OMERO's upload API reads
+  from a path rather than raw bytes, so a file still has to exist briefly
+  -- it just doesn't survive the run. Incompatible with `-o` (nothing to
+  point at) and with `--skip-upload` (that pair would generate an image and
+  throw it away).
+
+So the backfill-a-whole-group-into-OMERO-only invocation is:
+
+```sh
+lavlab lr batch -g 3 --workers 8 --skip-existing --skip-local
+```
+
 If you don't pass `-o`, output location falls back to `fs_map` -- a YAML
 file mapping OMERO group -> filesystem destination by regex match on the
 image name (`lavlab/data/default_fs_map.yaml` ships a lab default; `--fs-map
@@ -170,6 +190,33 @@ jpg`/`jpeg`/`png`/`tif`/`tiff` picks a different one) -- except with
 `--palette`, which refuses to combine with `jpg`/`jpeg`: a palette mask's
 pixel values are exact integer labels (`0`, `1`, `2`, ...), and JPEG's
 lossy compression would silently corrupt them.
+
+By default `roi` only ever *reads* from OMERO. `--upload` additionally
+attaches the rendered mask to the image, under the
+`LargeRecon.${downsample}.roi` namespace (the one legacy `batch_roi.py`
+used), named `LR${downsample}_${image name}_${suffix}.${format}`. It's
+opt-in precisely because everything else this command does is read-only.
+`--skip-existing` then skips any image that already has that exact mask
+attached, and `--skip-local` renders to a temporary file and deletes it
+after uploading -- so the group-wide, OMERO-only backfill is:
+
+```sh
+lavlab roi batch -g 3 --workers 4 --all --upload --skip-local --skip-existing
+```
+
+`--skip-local` requires `--upload` here (unlike `lr`, where uploading is
+the default, so the equivalent conflict is with `--skip-upload`) -- without
+it the mask would be rendered and immediately thrown away.
+
+**`roi` masks and `lr` recons never collide**, despite the shared namespace
+prefix: OMERO filters annotations by exact namespace equality, so
+`LargeRecon.10` and `LargeRecon.10.roi` are separate buckets. `lr`'s lookup
+matches on file extension alone, so that separation is the only thing
+keeping it from mistaking a mask for a recon -- there's a regression test
+(`test_roi_and_lr_annotations_do_not_collide`) pinning it down. `roi`'s own
+lookup additionally matches the whole filename, since `_annot` and
+`_exclude` masks legitimately share one namespace and differ only by
+suffix.
 
 ### `lavlab meta roi textvalue` -- backfill ROI comments from stroke color
 

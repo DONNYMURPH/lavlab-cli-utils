@@ -52,6 +52,8 @@ lavlab lr <image-id | batch> [-o OUTPUT] [-g GROUP] [--workers N]
 | `--workers` | Parallel workers for batch mode (default: 8) |
 | `--regenerate` | Skip the cached-annotation tier and force a fresh fetch, re-uploading the result |
 | `--skip-upload` | Don't write the fetched/generated result back to OMERO as an annotation |
+| `--skip-existing` | Skip images that already have a recon for this downsample+format, on a cheap existence check (no download, no regeneration). Rejected with `--regenerate` |
+| `--skip-local` | Keep no local copy: fetch/generate to a temp file, upload it, delete it. Rejected with `-o` and with `--skip-upload` |
 | `--format` | Output format: `jp2` (default), `jpg`, `jpeg`, `png`, `tif`, `tiff`. Also selects which format is searched for/uploaded as the cached annotation |
 | `--downsample` | Downsample factor (default: 10) |
 | `--fs-map` | Path to a custom `fs_map` YAML (default: the bundled lab map) |
@@ -94,6 +96,9 @@ lavlab roi <image-id | batch> [-o OUTPUT] [-g GROUP] [--workers N]
 | `--suffix` | Filename suffix (default: `_annot`) |
 | `--palette` | Single-channel label mask instead of RGB color mask. Incompatible with `--all` |
 | `--format` | Output format: `jp2` (default), `jpg`, `jpeg`, `png`, `tif`, `tiff`. Rejected together with `--palette` when it resolves to `jpg`/`jpeg` (including via an explicit `-o *.jpg` path) -- see below |
+| `--upload` | Also attach the rendered mask to the image under `LargeRecon.<downsample>.roi`, as `LR<downsample>_<image name>_<suffix>.<format>`. Off by default; `roi` is otherwise read-only |
+| `--skip-existing` | Skip images that already have this exact mask attached (same downsample, suffix and format), without re-rendering |
+| `--skip-local` | Render to a temp file, upload it, delete it. Requires `--upload`; rejected with `-o` |
 | `--downsample` | Downsample factor (default: 10) |
 | `--fs-map` | Path to a custom `fs_map` YAML |
 
