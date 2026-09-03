@@ -46,6 +46,16 @@ SAVE_BATCH = 50
 
 UNSUPPORTED_SHAPES = ("MaskI", "LabelI", "LineI")
 
+#: Namespace exported GeoJSON archives are attached under. Deliberately not
+#: under ``LargeRecon.*`` like the lr/roi attachments: those are artifacts of
+#: a specific downsample, whereas a GeoJSON export is vector data with no
+#: resolution attached to it at all. OMERO matches namespaces by exact
+#: equality, so this can never be confused with either of those.
+GEOJSON_NAMESPACE = "lavlab.geojson"
+
+#: RFC 7946's registered media type for GeoJSON.
+GEOJSON_MIMETYPE = "application/geo+json"
+
 
 @dataclass
 class ImportResult:
@@ -92,6 +102,75 @@ def safe_filename(name: str) -> str:
     """
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "").strip("._-")
     return cleaned or "image"
+
+
+def geojson_annotation_name(image) -> str:
+    """Return the canonical filename a GeoJSON export is stored under.
+
+    Identical to the local export filename, so an attachment downloaded
+    from OMERO and a file written by ``--out`` are recognisably the same
+    thing.
+
+    :param image: an OMERO ``ImageWrapper``
+    :return: e.g. ``N101_S06_HE.ome.tiff__omero-362.geojson``
+    :rtype: str
+    """
+    return f"{safe_filename(image.getName())}__omero-{image.getId()}.geojson"
+
+
+def _find_geojson_annotation(image, remote_name: str):
+    """Return the GeoJSON file annotation named exactly *remote_name*."""
+    for ann in image.listAnnotations(ns=GEOJSON_NAMESPACE):
+        if not hasattr(ann, "getFile"):
+            continue
+        f = ann.getFile()
+        if f is not None and f.getName() == remote_name:
+            return ann
+    return None
+
+
+def has_uploaded_geojson(image) -> bool:
+    """Return True if this image already has its GeoJSON export attached.
+
+    A cheap existence check -- it lists annotations, it never downloads --
+    so a caller can skip images that are already archived.
+
+    :param image: an OMERO ``ImageWrapper``
+    :return: whether a matching GeoJSON annotation exists
+    :rtype: bool
+    """
+    return _find_geojson_annotation(image, geojson_annotation_name(image)) is not None
+
+
+def upload_geojson(conn, image, local_path: str) -> str:
+    """Attach *local_path* to *image* as its GeoJSON export, replacing any
+    previous upload of the same file.
+
+    Only an annotation with this exact canonical filename is replaced;
+    anything else sharing the namespace is left alone.
+
+    :param conn: a connected gateway, already switched into the image's group
+    :param image: an OMERO ``ImageWrapper``
+    :param local_path: the ``.geojson`` file to upload
+    :type local_path: str
+    :return: the canonical filename it was uploaded as
+    :rtype: str
+    """
+    remote_name = geojson_annotation_name(image)
+
+    stale = _find_geojson_annotation(image, remote_name)
+    if stale is not None:
+        image.removeAnnotations([stale])
+        conn.deleteObject(stale._obj)
+
+    file_ann = conn.createFileAnnfromLocalFile(
+        local_path,
+        origFilePathAndName=remote_name,
+        mimetype=GEOJSON_MIMETYPE,
+        ns=GEOJSON_NAMESPACE,
+    )
+    image.linkAnnotation(file_ann)
+    return remote_name
 
 
 def build_roi(
@@ -360,7 +439,7 @@ def match_by_name(
     return pairs, problems
 
 
-def iter_images(conn, image=None, dataset=None, project=None):
+def iter_images(conn, image=None, dataset=None, project=None, group=None):
     """Yield the images selected by exactly one of the given identifiers.
 
     :param conn: a connected gateway
@@ -370,6 +449,8 @@ def iter_images(conn, image=None, dataset=None, project=None):
     :type dataset: int | None
     :param project: a project id
     :type project: int | None
+    :param group: a group id -- every image in it
+    :type group: int | None
     :raises LookupError: if the requested object is missing or unreadable
     :raises ValueError: if not exactly one identifier was given
     """
@@ -389,8 +470,14 @@ def iter_images(conn, image=None, dataset=None, project=None):
             raise LookupError(f"project {project} not found, or you cannot read it")
         for child in found.listChildren():
             yield from child.listChildren()
+    elif group is not None:
+        # Scope the session to the group first, the same way
+        # omero_client.iter_image_ids does -- otherwise the dummy group
+        # (-1) would list images from every group the user belongs to.
+        conn.SERVICE_OPTS.setOmeroGroup(str(group))
+        yield from conn.getObjects("Image")
     else:
-        raise ValueError("give exactly one of image, dataset or project")
+        raise ValueError("give exactly one of image, dataset, project or group")
 
 
 __all__ = [

@@ -402,3 +402,132 @@ def test_iter_images_no_identifier_raises_value_error():
     conn = _FakeConnForIter()
     with pytest.raises(ValueError):
         list(iter_images(conn))
+
+
+# ---------- geojson upload / existence check ----------
+
+
+class _FakeGeojsonAnn:
+    def __init__(self, name, ns):
+        self._name = name
+        self.ns = ns
+        self._obj = object()
+
+    def getFile(self):
+        return SimpleNamespace(getName=lambda: self._name)
+
+
+class _FakeGeojsonImage:
+    def __init__(self, name="N101_S06_HE.ome.tiff", image_id=362, anns=None):
+        self._name = name
+        self._id = image_id
+        self._anns = list(anns or [])
+        self.removed = []
+        self.linked = []
+
+    def getId(self):
+        return self._id
+
+    def getName(self):
+        return self._name
+
+    def listAnnotations(self, ns=None):
+        # mirrors omero.gateway's real filter: exact ns equality
+        return [a for a in self._anns if ns is None or a.ns == ns]
+
+    def removeAnnotations(self, anns):
+        self.removed.extend(anns)
+
+    def linkAnnotation(self, ann):
+        self.linked.append(ann)
+
+
+class _FakeGeojsonConn:
+    def __init__(self):
+        self.uploaded = []
+        self.deleted = []
+
+    def deleteObject(self, obj):
+        self.deleted.append(obj)
+
+    def createFileAnnfromLocalFile(self, path, origFilePathAndName=None, mimetype=None, ns=None):
+        self.uploaded.append((path, origFilePathAndName, mimetype, ns))
+        return _FakeGeojsonAnn(origFilePathAndName, ns)
+
+
+def test_geojson_annotation_name_matches_local_export_filename():
+    from lavlab.geojson.omero_io import geojson_annotation_name
+
+    name = geojson_annotation_name(_FakeGeojsonImage())
+    assert name == "N101_S06_HE.ome.tiff__omero-362.geojson"
+
+
+def test_has_uploaded_geojson_true_and_false():
+    from lavlab.geojson.omero_io import GEOJSON_NAMESPACE, has_uploaded_geojson
+
+    present = _FakeGeojsonImage(anns=[
+        _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE)
+    ])
+    assert has_uploaded_geojson(present) is True
+    assert has_uploaded_geojson(_FakeGeojsonImage()) is False
+
+
+def test_upload_geojson_uses_namespace_and_mimetype(tmp_path):
+    from lavlab.geojson.omero_io import (
+        GEOJSON_MIMETYPE,
+        GEOJSON_NAMESPACE,
+        upload_geojson,
+    )
+
+    local = tmp_path / "whatever.geojson"
+    local.write_text("{}", encoding="utf-8")
+    image = _FakeGeojsonImage()
+    conn = _FakeGeojsonConn()
+
+    remote = upload_geojson(conn, image, str(local))
+
+    assert remote == "N101_S06_HE.ome.tiff__omero-362.geojson"
+    assert conn.uploaded == [
+        (str(local), remote, GEOJSON_MIMETYPE, GEOJSON_NAMESPACE)
+    ]
+    assert len(image.linked) == 1
+
+
+def test_upload_geojson_replaces_previous_upload(tmp_path):
+    from lavlab.geojson.omero_io import GEOJSON_NAMESPACE, upload_geojson
+
+    local = tmp_path / "x.geojson"
+    local.write_text("{}", encoding="utf-8")
+    stale = _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE)
+    image = _FakeGeojsonImage(anns=[stale])
+    conn = _FakeGeojsonConn()
+
+    upload_geojson(conn, image, str(local))
+
+    assert image.removed == [stale]
+    assert conn.deleted == [stale._obj]
+
+
+def test_geojson_namespace_does_not_collide_with_lr_or_roi():
+    """All three attachment kinds coexist on one image without any of them
+    picking up another's file -- OMERO matches namespaces exactly."""
+    from lavlab.geojson.omero_io import GEOJSON_NAMESPACE, has_uploaded_geojson
+    from lavlab.large_recon import has_cached_recon
+    from lavlab.roi import has_uploaded_mask
+
+    image = _FakeGeojsonImage(anns=[
+        _FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10"),
+        _FakeGeojsonAnn("LR10_N101_S06_HE__annot.jp2", "LargeRecon.10.roi"),
+        _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE),
+    ])
+
+    assert has_cached_recon(image, 10, "jp2") is True
+    assert has_uploaded_mask(image, 10, "_annot", "jp2") is True
+    assert has_uploaded_geojson(image) is True
+
+    # and none of them sees the others when its own is missing
+    lr_only = _FakeGeojsonImage(anns=[
+        _FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10")
+    ])
+    assert has_uploaded_geojson(lr_only) is False
+    assert has_uploaded_mask(lr_only, 10, "_annot", "jp2") is False

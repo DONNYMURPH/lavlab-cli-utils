@@ -12,13 +12,20 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime as dt
 import logging
+import os
 import sys
 from pathlib import Path
 
-from lavlab.commands._shared import add_creds_args, connect_from_args, ensure_parent_dir
+from lavlab.commands._shared import (
+    add_creds_args,
+    connect_from_args,
+    ensure_parent_dir,
+    make_temp_path,
+)
 from lavlab.geojson.geojson_io import (
     ConversionError,
     convert_file,
@@ -64,8 +71,13 @@ def add_parser(subparsers) -> None:
     source.add_argument("--image", type=int)
     source.add_argument("--dataset", type=int)
     source.add_argument("--project", type=int)
+    source.add_argument(
+        "--group", type=int, help="every image in this OMERO group"
+    )
     output = exporter.add_argument_group("output")
-    output.add_argument("--out", required=True, help="directory to write into")
+    output.add_argument(
+        "--out", help="directory to write into (required unless --skip-local)"
+    )
     output.add_argument(
         "--skip-empty", action="store_true", help="no file for images with no ROIs"
     )
@@ -88,6 +100,23 @@ def add_parser(subparsers) -> None:
     )
     output.add_argument(
         "--overwrite", action="store_true", help="allow replacing an existing file"
+    )
+    output.add_argument(
+        "--upload",
+        action="store_true",
+        help="also attach the exported GeoJSON to the image in OMERO, under the "
+             "lavlab.geojson namespace",
+    )
+    output.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="skip images that already have their GeoJSON export attached",
+    )
+    output.add_argument(
+        "--skip-local",
+        action="store_true",
+        help="keep no local copy -- write to a temporary file, upload it, delete it. "
+             "Requires --upload; makes --out unnecessary",
     )
     add_creds_args(exporter)
     exporter.add_argument("--dry-run", action="store_true")
@@ -280,33 +309,60 @@ def run_import(args: argparse.Namespace) -> None:
 
 
 def run_export(args: argparse.Namespace) -> None:
-    from lavlab.geojson.omero_io import export_image, iter_images, safe_filename
+    from lavlab.geojson.omero_io import (
+        export_image,
+        geojson_annotation_name,
+        has_uploaded_geojson,
+        iter_images,
+        upload_geojson,
+    )
 
-    chosen = _exactly_one(image=args.image, dataset=args.dataset, project=args.project)
+    chosen = _exactly_one(
+        image=args.image, dataset=args.dataset, project=args.project, group=args.group
+    )
     if len(chosen) != 1:
         raise SystemExit(
-            "error: give exactly one of --image, --dataset or --project "
+            "error: give exactly one of --image, --dataset, --project or --group "
             f"(got {', '.join(chosen) or 'none'})"
         )
+    if args.skip_local and not args.upload:
+        raise SystemExit(
+            "error: --skip-local without --upload would export a GeoJSON and then "
+            "throw it away; add --upload, or drop --skip-local."
+        )
+    if not args.skip_local and not args.out:
+        raise SystemExit("error: --out is required unless --skip-local is given.")
 
-    outdir = Path(args.out)
-    if args.datestamp:
-        today = dt.datetime.now(tz=dt.timezone.utc).date().isoformat()
-        outdir = outdir / today
-    if not args.dry_run:
-        outdir.mkdir(parents=True, exist_ok=True)
+    outdir = Path(args.out) if args.out else None
+    if outdir is not None:
+        if args.datestamp:
+            today = dt.datetime.now(tz=dt.timezone.utc).date().isoformat()
+            outdir = outdir / today
+        if not args.dry_run:
+            outdir.mkdir(parents=True, exist_ok=True)
 
     conn = connect_from_args(args)
-    print(f"exporting to {outdir}" + (" [DRY RUN]" if args.dry_run else ""))
+    destination = "OMERO attachments only" if args.skip_local else str(outdir)
+    print(f"exporting to {destination}" + (" [DRY RUN]" if args.dry_run else ""))
     print()
 
-    images = written = features = 0
+    images = written = features = skipped = 0
     try:
         for image in iter_images(
-            conn, image=args.image, dataset=args.dataset, project=args.project
+            conn, image=args.image, dataset=args.dataset, project=args.project,
+            group=args.group,
         ):
             images += 1
             conn.SERVICE_OPTS.setOmeroGroup(image.getDetails().getGroup().getId())
+
+            if args.skip_existing and has_uploaded_geojson(image):
+                print(
+                    f"  {image.getName()} (image {image.getId()}) -> "
+                    "already attached, skipping"
+                )
+                skipped += 1
+                continue
+
             result = export_image(
                 conn,
                 image.getId(),
@@ -316,9 +372,7 @@ def run_export(args: argparse.Namespace) -> None:
             if not result.features and args.skip_empty:
                 continue
 
-            filename = (
-                f"{safe_filename(image.getName())}__omero-{image.getId()}.geojson"
-            )
+            filename = geojson_annotation_name(image)
             stats = summarise_features(result.features)
             print(f"  {image.getName()} (image {image.getId()}) -> {filename}")
             holes = f", {stats['holed']} with holes" if stats["holed"] else ""
@@ -335,32 +389,62 @@ def run_export(args: argparse.Namespace) -> None:
             for warning in result.warnings:
                 print(f"    {warning}")
 
-            target = outdir / filename
-            if target.exists() and not (args.overwrite or args.dry_run):
-                raise SystemExit(
-                    f"error: {target} already exists. An archive that silently "
-                    "overwrites itself is not an archive -- use --datestamp "
-                    "for dated runs, or --overwrite if that is what you meant."
-                )
+            if not args.skip_local:
+                target = outdir / filename
+                if target.exists() and not (args.overwrite or args.dry_run):
+                    raise SystemExit(
+                        f"error: {target} already exists. An archive that silently "
+                        "overwrites itself is not an archive -- use --datestamp "
+                        "for dated runs, or --overwrite if that is what you meant."
+                    )
+
             if not args.dry_run:
-                ensure_parent_dir(str(target))
-                target.write_text(
-                    dump_geojson(result.features, indent=None if args.compact else 1),
-                    encoding="utf-8",
+                text = dump_geojson(
+                    result.features, indent=None if args.compact else 1
                 )
+                if args.skip_local:
+                    local_path = make_temp_path("geojson")
+                else:
+                    ensure_parent_dir(str(target))
+                    local_path = str(target)
+                try:
+                    Path(local_path).write_text(text, encoding="utf-8")
+                    if args.upload:
+                        # A failed upload shouldn't lose an export that
+                        # otherwise succeeded -- same reasoning as lr/roi.
+                        try:
+                            upload_geojson(conn, image, local_path)
+                        except Exception:
+                            log.warning(
+                                "Image %d: exported but upload to OMERO failed.",
+                                image.getId(), exc_info=True,
+                            )
+                        else:
+                            print(f"    uploaded as {filename}")
+                finally:
+                    if args.skip_local:
+                        with contextlib.suppress(OSError):
+                            os.remove(local_path)
+
             features += len(result.features)
             written += 1
     finally:
         conn.close()
 
     print()
+    skipped_note = f", {skipped} already attached" if skipped else ""
     if args.dry_run:
         print(
-            f"(dry run -- {features} feature(s) from {images} image(s), "
-            "nothing written)"
+            f"(dry run -- {features} feature(s) from {images} image(s)"
+            f"{skipped_note}, nothing written)"
+        )
+    elif args.skip_local:
+        print(
+            f"done: {features} feature(s) from {images} image(s) uploaded for "
+            f"{written} image(s){skipped_note}, nothing stored locally"
         )
     else:
         print(
             f"done: {features} feature(s) from {images} image(s) written to "
-            f"{written} file(s) in {outdir}"
+            f"{written} file(s) in {outdir}{skipped_note}"
         )

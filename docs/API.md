@@ -158,8 +158,11 @@ lavlab geojson export --out DIR [--image ID | --dataset ID | --project ID]
 
 | Flag | Meaning |
 |---|---|
-| `--out` | Directory to write into (required) |
-| `--image` / `--dataset` / `--project` | Exactly one required -- what to export |
+| `--out` | Directory to write into. Required unless `--skip-local` |
+| `--image` / `--dataset` / `--project` / `--group` | Exactly one required -- what to export |
+| `--upload` | Also attach each export to its image under the `lavlab.geojson` namespace |
+| `--skip-existing` | Skip images that already have their GeoJSON export attached |
+| `--skip-local` | Write to a temp file, upload it, delete it. Requires `--upload`; makes `--out` unnecessary |
 | `--skip-empty` | No file written for images with zero ROIs |
 | `--compact` | Minified JSON output |
 | `--ellipse-points` | Vertices used to approximate an ellipse (default: 64) |

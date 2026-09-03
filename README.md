@@ -294,6 +294,31 @@ eyeball it before running rather than trusting a filename match).
 don't collide; without it, an existing output file blocks the run unless
 you pass `--overwrite`.
 
+`export` can also archive straight into OMERO rather than to disk.
+`--group <id>` exports every image in a group; `--upload` attaches each
+export to its own image under the `lavlab.geojson` namespace, named the
+same as the local file would be (`<image name>__omero-<id>.geojson`);
+`--skip-existing` skips images already archived that way; and
+`--skip-local` writes to a temporary file, uploads it and deletes it, so
+`--out` isn't needed at all:
+
+```sh
+lavlab geojson export --group 3 --upload --skip-local --skip-existing
+```
+
+The `lavlab.geojson` namespace is deliberately *not* under `LargeRecon.*`
+like the `lr` and `roi` attachments: those are artifacts of one specific
+downsample, while a GeoJSON export is vector data with no resolution
+attached to it. Since OMERO matches namespaces by exact equality, all
+three kinds of attachment coexist on an image without any command picking
+up another's file -- there's a test (`test_geojson_namespace_does_not_
+collide_with_lr_or_roi`) covering all three at once.
+
+Unlike `lr batch` and `roi batch`, this walks the group sequentially with
+no worker pool. Exporting ROIs is comparatively cheap -- database rows,
+not pixel data -- and staying single-process avoids the fork-safety
+problems that multiprocessing with Ice brings on macOS.
+
 ### `lavlab seg dcm2nii` / `nii2dcm` -- DICOM SEG <-> NIfTI
 
 ```sh
