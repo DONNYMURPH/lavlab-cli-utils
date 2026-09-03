@@ -307,3 +307,116 @@ def test_get_roi_mask_no_shapes_returns_empty_array_and_zero_count(monkeypatch):
 
     assert mask.size == 0
     assert shape_count == 0
+
+
+# ---------- upload / existence check ----------
+
+
+class _FakeOriginalFile:
+    def __init__(self, name):
+        self._name = name
+
+    def getName(self):
+        return self._name
+
+
+class _FakeFileAnnotation:
+    def __init__(self, name):
+        self._file = _FakeOriginalFile(name)
+        self._obj = object()
+
+    def getFile(self):
+        return self._file
+
+
+class _FakeUploadImage:
+    def __init__(self, name="N101_S06_HE.ome.tiff", annotations=None):
+        self._name = name
+        self._annotations = list(annotations or [])
+        self.removed = []
+        self.linked = []
+
+    def getId(self):
+        return 362
+
+    def getName(self):
+        return self._name
+
+    def listAnnotations(self, ns=None):
+        return list(self._annotations)
+
+    def removeAnnotations(self, anns):
+        self.removed.extend(anns)
+
+    def linkAnnotation(self, ann):
+        self.linked.append(ann)
+
+
+class _FakeUploadConn:
+    def __init__(self):
+        self.uploaded = []
+        self.deleted = []
+
+    def deleteObject(self, obj):
+        self.deleted.append(obj)
+
+    def createFileAnnfromLocalFile(self, path, origFilePathAndName=None, mimetype=None, ns=None):
+        self.uploaded.append((path, origFilePathAndName, mimetype, ns))
+        return _FakeFileAnnotation(origFilePathAndName or path)
+
+
+def test_roi_namespace_matches_legacy_convention():
+    assert roi_mod.roi_namespace(10) == "LargeRecon.10.roi"
+    assert roi_mod.roi_namespace(8) == "LargeRecon.8.roi"
+
+
+def test_mask_annotation_name_includes_suffix():
+    name = roi_mod.mask_annotation_name("N101_S06_HE.ome.tiff", 10, "_annot", "jp2")
+    assert name == "LR10_N101_S06_HE__annot.jp2"
+
+
+def test_has_uploaded_mask_true_when_present():
+    image = _FakeUploadImage(annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__annot.jp2")])
+    assert roi_mod.has_uploaded_mask(image, 10, "_annot", "jp2") is True
+
+
+def test_has_uploaded_mask_false_when_absent():
+    assert roi_mod.has_uploaded_mask(_FakeUploadImage(), 10, "_annot", "jp2") is False
+
+
+def test_has_uploaded_mask_is_suffix_specific():
+    # _annot and _exclude masks share one namespace -- an _exclude upload
+    # must not count as an _annot already being done.
+    image = _FakeUploadImage(annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__exclude.jp2")])
+    assert roi_mod.has_uploaded_mask(image, 10, "_exclude", "jp2") is True
+    assert roi_mod.has_uploaded_mask(image, 10, "_annot", "jp2") is False
+
+
+def test_upload_mask_uses_canonical_name_and_namespace(tmp_path):
+    local = tmp_path / "whatever_local_name.jp2"
+    local.write_bytes(b"mask")
+    image = _FakeUploadImage()
+    conn = _FakeUploadConn()
+
+    remote_name = roi_mod.upload_mask(conn, image, str(local), 10, "_annot", "jp2")
+
+    assert remote_name == "LR10_N101_S06_HE__annot.jp2"
+    assert conn.uploaded == [
+        (str(local), "LR10_N101_S06_HE__annot.jp2", "image/jp2", "LargeRecon.10.roi")
+    ]
+    assert len(image.linked) == 1
+    assert conn.deleted == []
+
+
+def test_upload_mask_replaces_only_the_same_mask(tmp_path):
+    local = tmp_path / "m.jp2"
+    local.write_bytes(b"mask")
+    stale = _FakeFileAnnotation("LR10_N101_S06_HE__annot.jp2")
+    other = _FakeFileAnnotation("LR10_N101_S06_HE__exclude.jp2")
+    image = _FakeUploadImage(annotations=[stale, other])
+    conn = _FakeUploadConn()
+
+    roi_mod.upload_mask(conn, image, str(local), 10, "_annot", "jp2")
+
+    assert image.removed == [stale]
+    assert conn.deleted == [stale._obj]

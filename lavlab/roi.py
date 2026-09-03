@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 """ROI shape gathering and rasterization into either an RGB color mask or a
-single-channel palette (label) mask.
+single-channel palette (label) mask, plus uploading the result back to OMERO
+as a file annotation.
 
 Rasterization uses scikit-image instead of OpenCV per project conventions.
 """
@@ -18,7 +19,142 @@ from omero_model_PolygonI import PolygonI
 from omero_model_RectangleI import RectangleI
 from skimage import draw
 
+from lavlab.naming import build_filename
+
 log = logging.getLogger(__name__)
+
+#: Namespace uploaded ROI masks live under, matching what legacy
+#: batch_roi.py/single_roi.py used ("LargeRecon.10.roi") so masks this tool
+#: uploads land alongside -- and are found by -- anything already there.
+_ROI_NAMESPACE_FMT = "LargeRecon.{}.roi"
+
+#: Deliberately a small local copy rather than a shared import from
+#: lavlab.large_recon: that module's upload path is live-tested against the
+#: production server, and roi's namespace/filename rules differ from its
+#: (masks match on full filename, since _annot and _exclude variants share
+#: one namespace). Worth consolidating if a third caller ever appears.
+_MIMETYPES = {
+    "jp2": "image/jp2",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "tif": "image/tiff",
+    "tiff": "image/tiff",
+}
+
+
+def roi_namespace(downsample: int) -> str:
+    """Return the OMERO annotation namespace ROI masks are stored under.
+
+    :param downsample: downsample factor the mask was rendered at
+    :type downsample: int
+    :return: e.g. ``LargeRecon.10.roi``
+    :rtype: str
+    """
+    return _ROI_NAMESPACE_FMT.format(downsample)
+
+
+def mask_annotation_name(
+    image_name: str, downsample: int, suffix: Optional[str], ext: str = "jp2"
+) -> str:
+    """Return the canonical filename an uploaded mask is stored under.
+
+    Same shape as the local filename (``LR10_<stem>_annot.jp2``), so a mask
+    uploaded from one machine is recognisable as the same thing generated on
+    another regardless of where either wrote it locally.
+
+    :param image_name: the OMERO image's name
+    :type image_name: str
+    :param downsample: downsample factor
+    :type downsample: int
+    :param suffix: filename suffix, e.g. ``_annot``
+    :type suffix: str | None
+    :param ext: file extension
+    :type ext: str
+    :return: the canonical remote filename
+    :rtype: str
+    """
+    return build_filename(downsample, image_name, suffix, ext)
+
+
+def _find_mask_annotation(image, namespace: str, remote_name: str):
+    """Return the file annotation in *namespace* named exactly *remote_name*.
+
+    Matches the whole filename rather than just the extension, because one
+    namespace legitimately holds several masks for the same image -- an
+    ``_annot`` and an ``_exclude`` differ only by suffix.
+    """
+    for ann in image.listAnnotations(ns=namespace):
+        if not hasattr(ann, "getFile"):
+            continue
+        f = ann.getFile()
+        if f is not None and f.getName() == remote_name:
+            return ann
+    return None
+
+
+def has_uploaded_mask(
+    image, downsample: int, suffix: Optional[str], ext: str = "jp2"
+) -> bool:
+    """Return True if this exact mask is already attached to *image*.
+
+    A cheap existence check -- it lists annotations, it never downloads --
+    so a caller can skip images that are already done.
+
+    :param image: an OMERO ``ImageWrapper``
+    :param downsample: downsample factor
+    :type downsample: int
+    :param suffix: filename suffix, e.g. ``_annot``
+    :type suffix: str | None
+    :param ext: file extension
+    :type ext: str
+    :return: whether a matching mask annotation exists
+    :rtype: bool
+    """
+    remote_name = mask_annotation_name(image.getName(), downsample, suffix, ext)
+    return _find_mask_annotation(image, roi_namespace(downsample), remote_name) is not None
+
+
+def upload_mask(
+    conn, image, local_path: str, downsample: int, suffix: Optional[str],
+    ext: str = "jp2",
+) -> str:
+    """Attach *local_path* to *image* as its ROI mask, replacing any previous
+    upload of the same mask.
+
+    Only an annotation with this exact canonical filename is replaced -- a
+    different mask of the same image (a different ``suffix``) or an
+    unrelated attachment sharing the namespace is left alone.
+
+    :param conn: a connected gateway, already switched into the image's group
+    :param image: an OMERO ``ImageWrapper``
+    :param local_path: the rendered mask file to upload
+    :type local_path: str
+    :param downsample: downsample factor
+    :type downsample: int
+    :param suffix: filename suffix, e.g. ``_annot``
+    :type suffix: str | None
+    :param ext: file extension
+    :type ext: str
+    :return: the canonical filename it was uploaded as
+    :rtype: str
+    """
+    namespace = roi_namespace(downsample)
+    remote_name = mask_annotation_name(image.getName(), downsample, suffix, ext)
+
+    stale = _find_mask_annotation(image, namespace, remote_name)
+    if stale is not None:
+        image.removeAnnotations([stale])
+        conn.deleteObject(stale._obj)
+
+    file_ann = conn.createFileAnnfromLocalFile(
+        local_path,
+        origFilePathAndName=remote_name,
+        mimetype=_MIMETYPES.get(ext, "application/octet-stream"),
+        ns=namespace,
+    )
+    image.linkAnnotation(file_ann)
+    return remote_name
 
 
 def _rectangle_perimeter(start: tuple[float, float], end: tuple[float, float],

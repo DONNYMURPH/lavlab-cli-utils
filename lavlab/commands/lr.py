@@ -10,7 +10,6 @@ import contextlib
 import logging
 import multiprocessing
 import os
-import tempfile
 
 from lavlab.commands._shared import (
     add_common_output_args,
@@ -18,6 +17,7 @@ from lavlab.commands._shared import (
     connect_from_args,
     group_of,
     load_fs_map_from_args,
+    make_temp_path,
     parse_target,
 )
 from lavlab.config import ConfigError
@@ -86,12 +86,6 @@ def _validate_args(args: argparse.Namespace) -> None:
         )
 
 
-def _make_temp_path(fmt: str) -> str:
-    fd, path = tempfile.mkstemp(suffix=f".{fmt}")
-    os.close(fd)
-    return path
-
-
 def run(args: argparse.Namespace) -> None:
     _validate_args(args)
     target = parse_target(args.target)
@@ -122,7 +116,7 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         name = image.getName()
 
         if args.skip_local:
-            output_path = _make_temp_path(args.format)
+            output_path = make_temp_path(args.format)
         else:
             fs_map = load_fs_map_from_args(args)
             try:
@@ -186,7 +180,7 @@ def _process_one(image_id: int):
             name = image.getName()
 
             if args.skip_local:
-                output_path = _make_temp_path(args.format)
+                output_path = make_temp_path(args.format)
             else:
                 output_path = resolve_output_path(
                     args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=True

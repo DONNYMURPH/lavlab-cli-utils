@@ -8,11 +8,30 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import tempfile
 
 from lavlab.config import ConfigError, load_fs_map, resolve_creds
 from lavlab.omero_client import connect, switch_to_object_group
 
 log = logging.getLogger(__name__)
+
+
+def make_temp_path(fmt: str) -> str:
+    """Create an empty temp file with a *fmt* extension and return its path.
+
+    Used by ``--skip-local``: OMERO's upload API reads from a real path
+    rather than raw bytes, so "don't keep a local copy" still needs a file
+    to exist for the duration of the upload. The caller is responsible for
+    deleting it afterward.
+
+    :param fmt: file extension, without the dot
+    :type fmt: str
+    :return: path to a new empty file
+    :rtype: str
+    """
+    fd, path = tempfile.mkstemp(suffix=f".{fmt}")
+    os.close(fd)
+    return path
 
 
 def add_creds_args(parser: argparse.ArgumentParser) -> None:
