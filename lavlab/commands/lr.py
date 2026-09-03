@@ -21,7 +21,7 @@ from lavlab.commands._shared import (
     parse_target,
 )
 from lavlab.config import ConfigError
-from lavlab.large_recon import fetch_large_recon
+from lavlab.large_recon import fetch_large_recon, has_cached_recon
 from lavlab.naming import resolve_output_path
 from lavlab.omero_client import is_conn_error, iter_image_ids
 
@@ -51,6 +51,13 @@ def add_parser(subparsers) -> None:
              "combination would do nothing).",
     )
     parser.add_argument(
+        "--skip-existing", action="store_true",
+        help="Skip any image that already has a large-recon annotation for this "
+             "downsample and format, without downloading or regenerating it. Useful for "
+             "backfilling a whole group: cached images cost one cheap existence check, "
+             "only the missing ones do real work. Incompatible with --regenerate.",
+    )
+    parser.add_argument(
         "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
         help="Output format when the filename isn't fixed by an explicit -o path "
              "(default: jp2). Also selects which format is searched for/uploaded as "
@@ -62,6 +69,11 @@ def add_parser(subparsers) -> None:
 
 
 def _validate_args(args: argparse.Namespace) -> None:
+    if args.skip_existing and args.regenerate:
+        raise SystemExit(
+            "error: --skip-existing and --regenerate are contradictory -- one skips "
+            "images that already have a recon, the other regenerates them regardless."
+        )
     if args.skip_local and args.skip_upload:
         raise SystemExit(
             "error: --skip-local and --skip-upload together would fetch/generate an "
@@ -102,6 +114,10 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         image = conn.getObject("Image", image_id)
         if image is None:
             raise SystemExit(f"error: image {image_id} not found.")
+        if args.skip_existing and has_cached_recon(image, args.downsample, args.format):
+            print(f"Image {image_id}: already has a large-recon, skipping.")
+            return
+
         group_id = group_of(conn, image)
         name = image.getName()
 
@@ -161,6 +177,11 @@ def _process_one(image_id: int):
             if image is None:
                 log.warning("Image %d not found, skipping.", image_id)
                 return None
+
+            if args.skip_existing and has_cached_recon(image, args.downsample, args.format):
+                print(f"Image {image_id}: already has a large-recon, skipping.")
+                return (image_id, None)
+
             group_id = group_of(conn, image)
             name = image.getName()
 

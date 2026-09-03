@@ -329,6 +329,30 @@ def test_creates_missing_parent_directory(tmp_path, monkeypatch):
     assert out.exists()
 
 
+def test_has_cached_recon_true_when_matching_annotation_exists():
+    image = _FakeImage(annotation=_FakeFileAnnotation("LR10_N101_S06_HE.jp2"))
+    assert large_recon.has_cached_recon(image, 10, "jp2") is True
+
+
+def test_has_cached_recon_false_when_no_annotations():
+    assert large_recon.has_cached_recon(_FakeImage(annotation=None), 10, "jp2") is False
+
+
+def test_has_cached_recon_is_format_specific():
+    # A .jpg cached at this downsample is not a .jp2 cache hit.
+    image = _FakeImage(annotation=_FakeFileAnnotation("LR10_N101_S06_HE.jpg"))
+    assert large_recon.has_cached_recon(image, 10, "jp2") is False
+    assert large_recon.has_cached_recon(image, 10, "jpg") is True
+
+
+def test_has_cached_recon_does_not_download(monkeypatch):
+    # The whole point of this check is that it's cheap -- listing
+    # annotations only, never pulling bytes.
+    monkeypatch.setattr(large_recon, "_download_annotation", _forbid)
+    image = _FakeImage(annotation=_FakeFileAnnotation("LR10_N101_S06_HE.jp2"))
+    assert large_recon.has_cached_recon(image, 10, "jp2") is True
+
+
 def test_namespace_format():
     assert large_recon._namespace(10) == "LargeRecon.10"
 

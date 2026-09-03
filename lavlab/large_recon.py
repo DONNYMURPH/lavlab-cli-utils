@@ -67,6 +67,26 @@ def _find_annotation(image, namespace: str, ext: str):
     return None
 
 
+def has_cached_recon(image, downsample: int, ext: str = "jp2") -> bool:
+    """Return True if *image* already has a large-recon annotation for this
+    downsample+format.
+
+    A cheap existence check -- it lists annotations, it does not download
+    anything -- for callers that want to skip already-cached images
+    outright rather than fetch them. This is the same test tier one uses
+    to decide whether it has a usable cache hit.
+
+    :param image: an OMERO ``ImageWrapper``
+    :param downsample: downsample factor, selecting the namespace
+    :type downsample: int
+    :param ext: file extension the cached recon must have
+    :type ext: str
+    :return: whether a matching cached recon exists
+    :rtype: bool
+    """
+    return _find_annotation(image, _namespace(downsample), ext) is not None
+
+
 def _download_annotation(ann, output_path: str) -> None:
     """Download *ann*'s bytes to *output_path*, atomically.
 
