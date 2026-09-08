@@ -126,3 +126,113 @@ jobs:
             dist/*.whl
             dist/lavlab-bin-macos-arm64-py*
           fail_on_unmatched_files: true
+
+  build-linux:
+    runs-on: ubuntu-latest   # native x86_64 -- no QEMU, no --platform flag needed
+    timeout-minutes: 90      # native compile should be much faster than emulated
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.11"
+            ice-wheel: "zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_x86_64.whl"
+          - python-version: "3.12"
+            ice-wheel: "zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_x86_64.whl"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install gcc/build tooling
+        # ubuntu-latest ships gcc already, but make sure headers etc. are present
+        run: sudo apt-get update && sudo apt-get install -y build-essential ccache
+
+      - name: Restore Nuitka ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/.cache/ccache
+          key: nuitka-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('build-requirements.txt', 'build_native.py', 'setup.py') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Download zeroc-ice wheel from Glencoe (Linux x86_64)
+        run: |
+          curl -fL -O \
+            "https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/${ICE_RELEASE_TAG}/${{ matrix.ice-wheel }}"
+          ls -lh ${{ matrix.ice-wheel }}
+        env:
+          ICE_RELEASE_TAG: "20240202"
+
+      - name: Install zeroc-ice and omero-py
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install ${{ matrix.ice-wheel }}
+          pip install omero-py==5.21.0
+          python -c "import omero.gateway, Ice; print('Ice', Ice.stringVersion())"
+
+      - name: Install build requirements
+        run: pip install -r build-requirements.txt
+
+      - name: Install zstandard for onefile compression
+        run: pip install zstandard
+
+      - name: Build the wheel
+        run: python setup.py bdist_wheel
+
+      - name: Show what was built
+        run: ls -lh dist/ lavlab/bin/
+
+      - name: Stage the standalone binary
+        run: |
+          cp lavlab/bin/lavlab-bin \
+             dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
+          ls -lh dist/
+
+      - name: Smoke test the wheel in a clean virtualenv
+        run: |
+          python -m venv /tmp/lavlab-smoke
+          /tmp/lavlab-smoke/bin/pip install dist/*.whl
+          /tmp/lavlab-smoke/bin/lavlab --help
+          /tmp/lavlab-smoke/bin/lavlab lr --help
+          /tmp/lavlab-smoke/bin/lavlab roi --help
+          /tmp/lavlab-smoke/bin/lavlab geojson --help
+          /tmp/lavlab-smoke/bin/lavlab seg --help
+          /tmp/lavlab-smoke/bin/lavlab meta --help
+
+      - name: Smoke test the standalone binary directly
+        run: |
+          chmod +x dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
+          ./dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }} --help
+
+      - name: Upload wheel as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavlab-wheel-linux-py${{ matrix.python-version }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+      - name: Upload standalone binary as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavlab-bin-linux-py${{ matrix.python-version }}
+          path: dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
+          if-no-files-found: error
+
+      - name: Attach wheel and binary to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/lavlab-bin-linux-x86_64-py*
+          fail_on_unmatched_files: true
