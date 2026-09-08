@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 COPY lavlab-bin /usr/local/bin/lavlab
 RUN chmod +x /usr/local/bin/lavlab
 ENTRYPOINT ["/usr/local/bin/lavlab"]
