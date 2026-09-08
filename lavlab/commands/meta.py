@@ -9,12 +9,12 @@ from __future__ import annotations
 import argparse
 import logging
 
-from omero.rtypes import rstring
-
 from lavlab.commands._shared import add_creds_args, connect_from_args, group_of
-from lavlab.omero_client import iter_image_ids
 from lavlab.palettes import load_color_mapping, match_color
-from lavlab.roi import get_rois, uint_to_rgba
+
+# omero.rtypes, lavlab.omero_client and lavlab.roi (numpy, skimage, omero)
+# are imported inside the functions that use them, so that building the
+# argument parser -- and therefore --help -- stays pure Python.
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ def _shape_has_comment(shape) -> bool:
 
 
 def _shape_color(shape):
+    from lavlab.roi import uint_to_rgba
+
     stroke = shape.getStrokeColor()
     if stroke is None:
         return None
@@ -72,6 +74,10 @@ def _shape_color(shape):
 def _process_image(
     conn, image_id: int, mapping, tolerance: int, dry_run: bool = False
 ) -> tuple[int, int, int]:
+    from omero.rtypes import rstring
+
+    from lavlab.roi import get_rois
+
     image = conn.getObject("Image", image_id)
     if image is None:
         log.warning("Image %d not found, skipping.", image_id)
@@ -114,6 +120,8 @@ def _process_image(
 
 
 def run(args: argparse.Namespace) -> None:
+    from lavlab.omero_client import iter_image_ids
+
     try:
         mapping = load_color_mapping(args.text_mapping)
     except (FileNotFoundError, ValueError) as exc:

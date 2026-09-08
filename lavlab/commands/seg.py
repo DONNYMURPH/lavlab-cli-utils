@@ -14,7 +14,10 @@ from __future__ import annotations
 import argparse
 import logging
 
-from lavlab.seg import dcmseg_to_nifti, nifti_to_dcmseg
+# lavlab.seg pulls in SimpleITK, highdicom, nibabel, pydicom and numpy. It is
+# imported inside the handlers so that building the argument parser -- and
+# therefore --help -- stays pure Python. seg touches neither vips nor OMERO,
+# so it should not be able to fail because of a problem in either.
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ def add_parser(subparsers) -> None:
 
 
 def run_dcm2nii(args: argparse.Namespace) -> None:
+    from lavlab.seg import dcmseg_to_nifti
+
     try:
         out_paths = dcmseg_to_nifti(args.dicom_seg, args.reference_nifti, args.output_dir)
     except (FileNotFoundError, ValueError) as exc:
@@ -73,6 +78,8 @@ def run_dcm2nii(args: argparse.Namespace) -> None:
 
 
 def run_nii2dcm(args: argparse.Namespace) -> None:
+    from lavlab.seg import nifti_to_dcmseg
+
     try:
         out_path = nifti_to_dcmseg(
             args.nifti_mask,

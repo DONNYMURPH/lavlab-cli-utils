@@ -49,7 +49,9 @@ lavlab = "lavlab.launcher:main"
 include = ["lavlab*"]
 
 [tool.setuptools.package-data]
-lavlab = ["data/*.yaml", "data/*.json", "bin/lavlab-bin"]
+# bin/dist is a Nuitka --standalone build: an executable plus the shared
+# libraries and package data it loads at runtime, nested several levels deep.
+lavlab = ["data/*.yaml", "data/*.json", "bin/dist/*", "bin/dist/**/*"]
 
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"

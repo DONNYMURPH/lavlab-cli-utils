@@ -11,7 +11,10 @@ import os
 import tempfile
 
 from lavlab.config import ConfigError, load_fs_map, resolve_creds
-from lavlab.omero_client import connect, switch_to_object_group
+
+# lavlab.omero_client pulls in omero-py (and through it Ice). It is imported
+# inside the functions that need a connection so that building the argument
+# parser -- and therefore --help -- stays pure Python.
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +50,8 @@ def add_common_output_args(parser: argparse.ArgumentParser) -> None:
 
 
 def connect_from_args(args: argparse.Namespace):
+    from lavlab.omero_client import connect
+
     try:
         creds = resolve_creds(args.user, args.password, args.host, args.port)
     except ConfigError as exc:
@@ -74,6 +79,8 @@ def parse_target(target: str) -> int | str:
 
 
 def group_of(conn, obj) -> int:
+    from lavlab.omero_client import switch_to_object_group
+
     switch_to_object_group(conn, obj)
     return obj.details.group.id.val
 

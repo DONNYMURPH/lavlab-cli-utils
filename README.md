@@ -31,8 +31,8 @@ you're using:
 
 - **Compiled binary** (what us lab members are designed to do): the
   `lavlab` console-script just `os.execv`s a self-contained native
-  executable (`lavlab/launcher.py` -> `lavlab/bin/lavlab-bin`), compiled
-  ahead of time with [Nuitka](https://nuitka.net). No Python environment,
+  executable (`lavlab/launcher.py` -> `lavlab/bin/dist/lavlab-bin`),
+  compiled ahead of time with [Nuitka](https://nuitka.net). No Python environment,
   no `omero-py`, no Ice bindings needed on the machine running it.
 - **Source checkout** (development): `python -m lavlab ...` runs the real
   Python CLI directly (`lavlab/__main__.py` -> `lavlab/cli.py`). This is
@@ -377,9 +377,15 @@ its own directory on the path and uses the environment you already set up.
 
 This shells out to Nuitka (`setup.py`'s `build_py` override, or run
 `build_native.py` standalone if you just want the compiled binary without
-a full wheel) to compile `lavlab/__main__.py` into a single standalone
-executable, bundled into the wheel as `lavlab/bin/lavlab-bin`; the
-`lavlab` console-script just execs it. `[tool.cibuildwheel]` in
+a full wheel) to compile `lavlab/__main__.py` into a standalone
+executable, bundled into the wheel as `lavlab/bin/dist/`; the
+`lavlab` console-script just execs `lavlab/bin/dist/lavlab-bin`. The
+build is `--standalone` rather than `--onefile`: the artifact is a
+directory, because `lavlab-bin` resolves its bundled shared libraries
+through `RPATH=$ORIGIN` and has to stay next to them. Onefile was
+dropped deliberately -- its bootstrap reports a child killed by a signal
+as exit 0, which turned a crash into a silent success everywhere,
+including in CI. `[tool.cibuildwheel]` in
 `pyproject.toml` is already configured to build this for
 `linux-x86_64`/`macos-arm64` across `cp310`-`cp314` (Windows and
 musllinux are skipped), but isn't wired into any CI yet -- see

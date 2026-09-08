@@ -13,9 +13,6 @@ import multiprocessing
 import os
 from typing import Optional
 
-import numpy as np
-import pyvips as pv
-
 from lavlab.commands._shared import (
     add_common_output_args,
     add_creds_args,
@@ -27,10 +24,11 @@ from lavlab.commands._shared import (
     parse_target,
 )
 from lavlab.config import ConfigError
-from lavlab.imaging import write_recon
 from lavlab.naming import resolve_output_path
-from lavlab.omero_client import get_source_file_path, is_conn_error, iter_image_ids
-from lavlab.roi import get_roi_mask, has_uploaded_mask, upload_mask
+
+# pyvips, lavlab.imaging and lavlab.roi (numpy, skimage, omero) are imported
+# inside the functions that use them, so that building the argument parser --
+# and therefore --help -- stays pure Python.
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +129,11 @@ def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -
     """Render and write the ROI mask, uploading it if --upload was given;
     returns how many shapes were rendered, or None if nothing matched the
     given filters."""
+    import pyvips as pv
+
+    from lavlab.imaging import write_recon
+    from lavlab.roi import get_roi_mask, upload_mask
+
     mask, shape_count = get_roi_mask(
         image, args.downsample, include_all=args.all, text_filter=args.text_filter, palette=args.palette
     )
@@ -161,6 +164,8 @@ def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -
 
 
 def _run_single(args: argparse.Namespace, image_id: int) -> None:
+    from lavlab.roi import has_uploaded_mask
+
     conn = connect_from_args(args)
     try:
         image = conn.getObject("Image", image_id)
@@ -222,6 +227,9 @@ def _init_worker(args: argparse.Namespace, fs_map) -> None:
 
 
 def _process_one(image_id: int):
+    from lavlab.omero_client import is_conn_error
+    from lavlab.roi import has_uploaded_mask
+
     args = _WORKER_STATE["args"]
     fs_map = _WORKER_STATE["fs_map"]
     max_attempts = 3
@@ -291,6 +299,11 @@ def _process_one(image_id: int):
 
 
 def _run_batch(args: argparse.Namespace) -> None:
+    # Importing omero_client is not Ice *usage*, and this is no earlier than
+    # the module-level import it replaced, so it does not affect the
+    # fork-before-Ice ordering described below.
+    from lavlab.omero_client import iter_image_ids
+
     # Fork the worker pool before this (parent) process ever touches
     # OMERO/Ice -- see the identical comment in lavlab/commands/lr.py's
     # _run_batch for the confirmed root cause (fork() after any Ice usage

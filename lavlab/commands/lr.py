@@ -21,9 +21,11 @@ from lavlab.commands._shared import (
     parse_target,
 )
 from lavlab.config import ConfigError
-from lavlab.large_recon import fetch_large_recon, has_cached_recon
 from lavlab.naming import resolve_output_path
-from lavlab.omero_client import is_conn_error, iter_image_ids
+
+# lavlab.large_recon (pyvips, tifffile, numpy) and lavlab.omero_client
+# (omero-py, Ice) are imported inside the functions that use them, so that
+# building the argument parser -- and therefore --help -- stays pure Python.
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +98,8 @@ def run(args: argparse.Namespace) -> None:
 
 
 def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -> str:
+    from lavlab.large_recon import fetch_large_recon
+
     return fetch_large_recon(
         conn, image, args.downsample, output_path,
         regenerate=args.regenerate, skip_upload=args.skip_upload,
@@ -103,6 +107,8 @@ def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -
 
 
 def _run_single(args: argparse.Namespace, image_id: int) -> None:
+    from lavlab.large_recon import has_cached_recon
+
     conn = connect_from_args(args)
     try:
         image = conn.getObject("Image", image_id)
@@ -157,6 +163,9 @@ def _init_worker(args: argparse.Namespace, fs_map) -> None:
 
 
 def _process_one(image_id: int):
+    from lavlab.large_recon import has_cached_recon
+    from lavlab.omero_client import is_conn_error
+
     args = _WORKER_STATE["args"]
     fs_map = _WORKER_STATE["fs_map"]
     max_attempts = 3
@@ -214,6 +223,11 @@ def _process_one(image_id: int):
 
 
 def _run_batch(args: argparse.Namespace) -> None:
+    # Importing omero_client is not Ice *usage*, and this is no earlier than
+    # the module-level import it replaced, so the fork-before-Ice ordering
+    # this function depends on is unchanged.
+    from lavlab.omero_client import iter_image_ids
+
     fs_map = load_fs_map_from_args(args)
     log.info("Starting %d workers.", args.workers)
 

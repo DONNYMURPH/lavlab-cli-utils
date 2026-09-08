@@ -3,8 +3,12 @@
 # SPDX-License-Identifier: MIT
 """``lavlab`` CLI entry point.
 
-Single-file entry point suitable for a Nuitka --onefile build:
-``nuitka --onefile --output-filename=lavlab lavlab/__main__.py``
+Entry point for the Nuitka --standalone build (see ``build_native.py``).
+
+Building the parser must stay pure Python: the command modules import
+numpy/pyvips/omero/SimpleITK inside their handlers rather than at module
+scope, so that ``--help`` cannot be broken by a problem in a native
+dependency the chosen subcommand never touches.
 """
 
 from __future__ import annotations

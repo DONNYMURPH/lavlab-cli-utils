@@ -11,7 +11,6 @@ try:
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"omero-py unavailable: {exc}", allow_module_level=True)
 
-import lavlab.commands.meta as meta_mod
 from lavlab.commands.meta import _process_image, _shape_color, _shape_has_comment
 
 
@@ -137,8 +136,10 @@ def test_process_image_updates_matches_skips_commented_and_unmatched(monkeypatch
 
     image = _FakeImage(image_id=362)
     conn = _FakeConn(image=image)
+    # _process_image imports get_rois from lavlab.roi at call time (keeping
+    # numpy/skimage/omero out of parser construction), so patch it at source.
     monkeypatch.setattr(
-        meta_mod, "get_rois",
+        "lavlab.roi.get_rois",
         lambda img: [_FakeRoi([already_commented, matches_palette, no_color, unmatched_color])],
     )
 
@@ -161,7 +162,7 @@ def test_process_image_dry_run_reports_without_writing(monkeypatch, caplog):
     matches_palette = _rectangle(1, rgba=(25, 20, 255))
     image = _FakeImage(image_id=362)
     conn = _FakeConn(image=image)
-    monkeypatch.setattr(meta_mod, "get_rois", lambda img: [_FakeRoi([matches_palette])])
+    monkeypatch.setattr("lavlab.roi.get_rois", lambda img: [_FakeRoi([matches_palette])])
 
     mapping = {(25, 20, 255): "Seminal Vesicles"}
     with caplog.at_level("INFO"):
