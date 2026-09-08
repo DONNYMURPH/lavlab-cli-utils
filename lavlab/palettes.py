@@ -27,7 +27,7 @@ BUILTIN_PALETTES: dict[str, ColorMap] = {
     "default": {
         (25, 20, 255): "Seminal Vesicles",
         (0, 0, 0): "Atrophy",
-        (255, 120, 0): "HGPIN",
+        (255, 122, 0): "HGPIN",
         (48, 255, 50): "G3",
         (255, 250, 20): "G4FG",
         (254, 22, 255): "G4CG",
