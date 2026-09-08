@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-14   # Apple Silicon runner -- must match the arm64 target
     timeout-minutes: 180 # Nuitka's C compilation is slow (~1600 files)
     permissions:
       contents: write
@@ -42,8 +42,6 @@ jobs:
             nuitka-${{ runner.os }}-py${{ matrix.python-version }}-
 
       - name: Download zeroc-ice wheel from Glencoe
-        # -O keeps the original filename; pip rejects renamed wheels because it
-        # parses metadata out of the filename itself.
         run: |
           curl -fL -O \
             "https://github.com/glencoesoftware/zeroc-ice-py-macos-universal2/releases/download/${ICE_RELEASE_TAG}/${{ matrix.ice-wheel }}"
@@ -61,37 +59,37 @@ jobs:
       - name: Install build requirements
         run: pip install -r build-requirements.txt
 
-      - name: Install zstandard for onefile compression
-        run: pip install zstandard
-
       - name: Build the wheel
         run: python setup.py bdist_wheel
 
       - name: Show what was built
         run: ls -lh dist/ lavlab/bin/
 
-      - name: Stage the standalone binary
+      - name: Stage the standalone dist
         run: |
-          cp lavlab/bin/lavlab-bin \
-             dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
+          tar -C lavlab/bin -czf \
+            dist/lavlab-macos-arm64-py${{ matrix.python-version }}.tar.gz dist
           ls -lh dist/
 
       - name: Smoke test the wheel in a clean virtualenv
         run: |
           python -m venv /tmp/lavlab-smoke
           /tmp/lavlab-smoke/bin/pip install dist/*.whl
-          /tmp/lavlab-smoke/bin/lavlab --help
-          /tmp/lavlab-smoke/bin/lavlab lr --help
-          /tmp/lavlab-smoke/bin/lavlab roi --help
-          /tmp/lavlab-smoke/bin/lavlab geojson --help
-          /tmp/lavlab-smoke/bin/lavlab seg --help
-          /tmp/lavlab-smoke/bin/lavlab meta --help
+          out=$(/tmp/lavlab-smoke/bin/lavlab --help) || exit 1
+          [ -n "$out" ] || { echo "--help produced no output"; exit 1; }
+          case "$out" in usage:*) ;; *) echo "unexpected --help output"; exit 1 ;; esac
+          for sub in lr roi geojson seg meta; do
+            subout=$(/tmp/lavlab-smoke/bin/lavlab "$sub" --help) || exit 1
+            [ -n "$subout" ] || { echo "$sub --help produced no output"; exit 1; }
+          done
 
       - name: Smoke test the standalone binary directly
         # No venv, no pip -- just run the compiled artifact on its own.
         run: |
-          chmod +x dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
-          ./dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }} --help
+          chmod +x lavlab/bin/dist/lavlab-bin
+          out=$(./lavlab/bin/dist/lavlab-bin --help) || exit 1
+          [ -n "$out" ] || { echo "--help produced no output"; exit 1; }
+          case "$out" in usage:*) ;; *) echo "unexpected --help output"; exit 1 ;; esac
 
       - name: Upload wheel as a build artifact
         uses: actions/upload-artifact@v4
@@ -100,28 +98,28 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-      - name: Upload standalone binary as a build artifact
+      - name: Upload standalone dist as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lavlab-bin-py${{ matrix.python-version }}
-          path: dist/lavlab-bin-macos-arm64-py${{ matrix.python-version }}
+          name: lavlab-dist-py${{ matrix.python-version }}
+          path: dist/lavlab-macos-arm64-py${{ matrix.python-version }}.tar.gz
           if-no-files-found: error
 
-      - name: Attach wheel and binary to the GitHub Release
+      - name: Attach wheel and dist to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.whl
-            dist/lavlab-bin-macos-arm64-py*
+            dist/lavlab-macos-arm64-py*.tar.gz
           fail_on_unmatched_files: true
 
   build-linux:
-    runs-on: ubuntu-24.04   
-    timeout-minutes: 180      
+    runs-on: ubuntu-24.04 
+    timeout-minutes: 180
     permissions:
       contents: write
-      packages: write
+      packages: write 
 
     strategy:
       fail-fast: false
@@ -172,19 +170,16 @@ jobs:
       - name: Install build requirements
         run: pip install -r build-requirements.txt
 
-      - name: Install zstandard for onefile compression
-        run: pip install zstandard
-
       - name: Build the wheel
         run: python setup.py bdist_wheel
 
       - name: Show what was built
         run: ls -lh dist/ lavlab/bin/
 
-      - name: Stage the standalone binary
+      - name: Stage the standalone dist
         run: |
-          cp lavlab/bin/lavlab-bin \
-             dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
+          tar -C lavlab/bin -czf \
+            dist/lavlab-linux-x86_64-py${{ matrix.python-version }}.tar.gz dist
           ls -lh dist/
 
       - name: Log in to GHCR
@@ -197,7 +192,7 @@ jobs:
 
       - name: Prepare Dockerfile.runtime build context
         if: startsWith(github.ref, 'refs/tags/') && matrix.python-version == '3.11'
-        run: cp lavlab/bin/lavlab-bin lavlab-bin
+        run: cp -r lavlab/bin/dist lavlab-dist
 
       - name: Build and push runtime image to GHCR
         if: startsWith(github.ref, 'refs/tags/') && matrix.python-version == '3.11'
@@ -214,17 +209,20 @@ jobs:
         run: |
           python -m venv /tmp/lavlab-smoke
           /tmp/lavlab-smoke/bin/pip install dist/*.whl
-          /tmp/lavlab-smoke/bin/lavlab --help
-          /tmp/lavlab-smoke/bin/lavlab lr --help
-          /tmp/lavlab-smoke/bin/lavlab roi --help
-          /tmp/lavlab-smoke/bin/lavlab geojson --help
-          /tmp/lavlab-smoke/bin/lavlab seg --help
-          /tmp/lavlab-smoke/bin/lavlab meta --help
+          out=$(/tmp/lavlab-smoke/bin/lavlab --help) || exit 1
+          [ -n "$out" ] || { echo "--help produced no output"; exit 1; }
+          case "$out" in usage:*) ;; *) echo "unexpected --help output"; exit 1 ;; esac
+          for sub in lr roi geojson seg meta; do
+            subout=$(/tmp/lavlab-smoke/bin/lavlab "$sub" --help) || exit 1
+            [ -n "$subout" ] || { echo "$sub --help produced no output"; exit 1; }
+          done
 
       - name: Smoke test the standalone binary directly
         run: |
-          chmod +x dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
-          ./dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }} --help
+          chmod +x lavlab/bin/dist/lavlab-bin
+          out=$(./lavlab/bin/dist/lavlab-bin --help) || exit 1
+          [ -n "$out" ] || { echo "--help produced no output"; exit 1; }
+          case "$out" in usage:*) ;; *) echo "unexpected --help output"; exit 1 ;; esac
 
       - name: Upload wheel as a build artifact
         uses: actions/upload-artifact@v4
@@ -233,18 +231,18 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-      - name: Upload standalone binary as a build artifact
+      - name: Upload standalone dist as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lavlab-bin-linux-py${{ matrix.python-version }}
-          path: dist/lavlab-bin-linux-x86_64-py${{ matrix.python-version }}
+          name: lavlab-dist-linux-py${{ matrix.python-version }}
+          path: dist/lavlab-linux-x86_64-py${{ matrix.python-version }}.tar.gz
           if-no-files-found: error
 
-      - name: Attach wheel and binary to the GitHub Release
+      - name: Attach wheel and dist to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.whl
-            dist/lavlab-bin-linux-x86_64-py*
+            dist/lavlab-linux-x86_64-py*.tar.gz
           fail_on_unmatched_files: true
