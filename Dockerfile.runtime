@@ -1,0 +1,4 @@
+FROM debian:bookworm-slim
+COPY lavlab-bin /usr/local/bin/lavlab
+RUN chmod +x /usr/local/bin/lavlab
+ENTRYPOINT ["/usr/local/bin/lavlab"]
