@@ -9,7 +9,9 @@ on:
 jobs:
   build:
     runs-on: macos-14   # Apple Silicon runner -- must match the arm64 target
-    timeout-minutes: 90 # Nuitka's C compilation is slow (~1600 files)
+    timeout-minutes: 150 # Nuitka's C compilation is slow (~1600 files)
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false   # if 3.11 fails, still try 3.12 (and vice versa)
