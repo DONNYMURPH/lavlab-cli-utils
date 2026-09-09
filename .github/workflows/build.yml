@@ -65,6 +65,18 @@ jobs:
       - name: Show what was built
         run: ls -lh dist/ lavlab/bin/
 
+      - name: Assert imagecodecs codecs were bundled
+        run: |
+          for m in _shared_cython _jpeg8 _jpeg2k _imcd _ljpeg; do
+            test -f lavlab/bin/dist/imagecodecs/$m.so \
+              || { echo "codec $m missing from dist"; exit 1; }
+          done
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          python -m pytest -q
+
       - name: Stage the standalone dist
         run: |
           tar -C lavlab/bin -czf \
@@ -115,11 +127,11 @@ jobs:
           fail_on_unmatched_files: true
 
   build-linux:
-    runs-on: ubuntu-24.04 
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
       contents: write
-      packages: write 
+      packages: write
 
     strategy:
       fail-fast: false
@@ -175,6 +187,18 @@ jobs:
 
       - name: Show what was built
         run: ls -lh dist/ lavlab/bin/
+
+      - name: Assert imagecodecs codecs were bundled
+        run: |
+          for m in _shared_cython _jpeg8 _jpeg2k _imcd _ljpeg; do
+            test -f lavlab/bin/dist/imagecodecs/$m.so \
+              || { echo "codec $m missing from dist"; exit 1; }
+          done
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          python -m pytest -q
 
       - name: Stage the standalone dist
         run: |
