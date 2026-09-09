@@ -14,7 +14,12 @@ from pathlib import Path
 from setuptools import setup
 from setuptools.command.build_py import build_py as _build_py
 
-from build_native import PYDICOM_NUITKA_FLAGS, omero_ice_modules, restore_unpatched_vips
+from build_native import (
+    IMAGECODECS_NUITKA_FLAGS,
+    PYDICOM_NUITKA_FLAGS,
+    omero_ice_modules,
+    restore_unpatched_vips,
+)
 
 
 class build_py(_build_py):
@@ -48,6 +53,7 @@ class build_py(_build_py):
             "--include-package=lavlab",
             "--include-package-data=lavlab",
             *PYDICOM_NUITKA_FLAGS,
+            *IMAGECODECS_NUITKA_FLAGS,
             str(project_dir / "lavlab" / "__main__.py"),
         ]
         command[3:3] = [f"--include-module={name}" for name in omero_ice_modules()]
@@ -69,6 +75,9 @@ class build_py(_build_py):
         # package-data glob can both rely on, on every platform.
         staged_dist.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(nuitka_dist, staged_dist, symlinks=True)
+        staged_in_build_lib = Path(self.build_lib) / "lavlab" / "bin"
+        if staged_in_build_lib.exists():
+            shutil.rmtree(staged_in_build_lib)
 
         super().run()
 

@@ -362,3 +362,85 @@ def test_mimetype_for_ext_known_and_unknown():
     assert large_recon._mimetype_for_ext("jpg") == "image/jpeg"
     assert large_recon._mimetype_for_ext("png") == "image/png"
     assert large_recon._mimetype_for_ext("bmp") == "application/octet-stream"
+
+
+# --- tier 2 -> tier 3 fallback -------------------------------------------
+
+
+def _local_source(tmp_path, monkeypatch, raises):
+    """Wire up a readable local source whose load_downsampled raises *raises*."""
+    src = tmp_path / "src.ome.tiff"
+    src.write_bytes(b"whatever")
+
+    def _boom(path, downsample):
+        raise raises
+
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: str(src))
+    monkeypatch.setattr(large_recon, "load_downsampled", _boom)
+    return src
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ValueError("<COMPRESSION.JPEG: 7> requires the 'imagecodecs' package"),
+        ImportError("could not import name 'jpeg8_decode' from 'imagecodecs'"),
+        OSError("Stale file handle"),
+        KeyError("34712"),
+        IndexError("list index out of range"),
+        MemoryError(),
+        large_recon.pv.Error("libvips could not open the file"),
+    ],
+)
+def test_local_read_failure_falls_back_to_network(tmp_path, monkeypatch, caplog, exc):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+    _local_source(tmp_path, monkeypatch, exc)
+    monkeypatch.setattr(large_recon, "generate_over_network", lambda c, im, d: object())
+    _stub_write_recon(monkeypatch)
+
+    out = tmp_path / "out.jp2"
+    with caplog.at_level("WARNING"):
+        tier = fetch_large_recon(conn, image, 10, str(out))
+    assert tier == "network"
+    assert out.read_bytes() == b"generated"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    msg = warnings[0].getMessage()
+    assert "tier 2" in msg and "tier 3" in msg.lower()
+    assert type(exc).__name__ in msg
+    assert "src.ome.tiff" in msg
+
+
+@pytest.mark.parametrize(
+    "exc", [AttributeError("'NoneType' has no attribute 'shape'"),
+            TypeError("unsupported operand"),
+            NameError("name 'foo' is not defined")],
+)
+def test_local_read_bug_is_not_masked_by_fallback(tmp_path, monkeypatch, exc):
+    """Programming errors must propagate, not vanish into a slow retry."""
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+    _local_source(tmp_path, monkeypatch, exc)
+    monkeypatch.setattr(large_recon, "generate_over_network", _forbid)
+    _stub_write_recon(monkeypatch)
+
+    with pytest.raises(type(exc)):
+        fetch_large_recon(conn, image, 10, str(tmp_path / "out.jp2"))
+
+
+def test_successful_local_read_does_not_warn_or_hit_network(tmp_path, monkeypatch, caplog):
+    image = _FakeImage(annotation=None)
+    conn = _FakeConn()
+    src = tmp_path / "src.ome.tiff"
+    src.write_bytes(b"whatever")
+    monkeypatch.setattr(large_recon, "get_source_file_path", lambda c, i: str(src))
+    monkeypatch.setattr(large_recon, "load_downsampled", lambda p, d: object())
+    monkeypatch.setattr(large_recon, "generate_over_network", _forbid)
+    _stub_write_recon(monkeypatch)
+
+    with caplog.at_level("WARNING"):
+        tier = fetch_large_recon(conn, image, 10, str(tmp_path / "out.jp2"))
+
+    assert tier == "local"
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []

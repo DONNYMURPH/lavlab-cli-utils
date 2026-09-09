@@ -5,7 +5,10 @@
 
 Tries, in order: an existing OMERO ``LargeRecon.{downsample}`` file
 annotation matching the requested format; a locally-mounted source file;
-OMERO's tile API. Whichever of the latter two produces an image is written
+OMERO's tile API. Each tier falls forward to the next when it cannot
+deliver -- a cached annotation that won't download, or a local source that
+won't decode, drops through to the tier below with a warning rather than
+failing the image. Whichever of the latter two produces an image is written
 out and (unless skipped) uploaded back to OMERO under the same namespace,
 under a canonical ``LR{downsample}_{image name}.{ext}`` filename independent
 of wherever it was written locally, so later calls at the same
@@ -19,12 +22,23 @@ import logging
 import os
 from typing import Literal
 
+import pyvips as pv
+
 from lavlab.imaging import load_downsampled, write_recon
 from lavlab.naming import build_filename
 from lavlab.omero_client import get_source_file_path
 from lavlab.omero_tiles import generate_over_network
 
 log = logging.getLogger(__name__)
+_LOCAL_SOURCE_ERRORS = (
+    OSError,
+    ValueError,
+    KeyError,
+    IndexError,
+    ImportError,
+    MemoryError,
+    pv.Error,
+)
 
 _NAMESPACE_PREFIX = "LargeRecon."
 
@@ -158,7 +172,9 @@ def fetch_large_recon(
         regenerate fresh.
     :param skip_upload: Don't write the result back to OMERO as an
         annotation.
-    :return: which tier satisfied the request.
+    :return: which tier actually satisfied the request. A local source that
+        fails to decode is logged at WARNING and falls back to "network",
+        so this reflects what happened rather than what was attempted.
     :raises lavlab.omero_tiles.LargeReconError: propagated unwrapped from
         tier "network".
     """
@@ -188,16 +204,38 @@ def fetch_large_recon(
                 return "annotation"
 
     src_path = get_source_file_path(conn, image_id)
-    if src_path is not None and os.path.exists(src_path):
+    have_local = src_path is not None and os.path.exists(src_path)
+
+    img = None
+    tier: Tier = "network"
+
+    if have_local:
         log.info("Image %d: no usable cache; generating from local source %s...",
                   image_id, src_path)
-        img = load_downsampled(src_path, downsample)
-        tier: Tier = "local"
-    else:
-        log.info(
-            "Image %d: no usable cache or local source; generating over the "
-            "network (this can take several minutes)...", image_id,
-        )
+        try:
+            img = load_downsampled(src_path, downsample)
+        except _LOCAL_SOURCE_ERRORS as exc:
+            log.warning(
+                "Image %d: tier 2 (local source) failed for '%s' -- %s: %s. "
+                "Falling back to tier 3 (OMERO tile API), which is much "
+                "slower. If this happens for every image, the mounted "
+                "repository is not readable and should be investigated.",
+                image_id, src_path, type(exc).__name__, exc, exc_info=True,
+            )
+        else:
+            tier = "local"
+
+    if img is None:
+        if have_local:
+            log.info(
+                "Image %d: generating over the network instead (this can take "
+                "several minutes)...", image_id,
+            )
+        else:
+            log.info(
+                "Image %d: no usable cache or local source; generating over the "
+                "network (this can take several minutes)...", image_id,
+            )
         img = generate_over_network(conn, image, downsample)
         tier = "network"
 

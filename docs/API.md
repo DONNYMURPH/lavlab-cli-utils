@@ -39,6 +39,7 @@ value from both raises `ConfigError` -> `SystemExit`, not a prompt.
 ```
 lavlab lr <image-id | batch> [-o OUTPUT] [-g GROUP] [--workers N]
                               [--regenerate] [--skip-upload]
+                              [--max-failed N]
                               [--format jp2|jpg|jpeg|png|tif|tiff]
                               [--downsample N] [--fs-map PATH]
                               [creds...]
@@ -54,6 +55,7 @@ lavlab lr <image-id | batch> [-o OUTPUT] [-g GROUP] [--workers N]
 | `--skip-upload` | Don't write the fetched/generated result back to OMERO as an annotation |
 | `--skip-existing` | Skip images that already have a recon for this downsample+format, on a cheap existence check (no download, no regeneration). Rejected with `--regenerate` |
 | `--skip-local` | Keep no local copy: fetch/generate to a temp file, upload it, delete it. Rejected with `-o` and with `--skip-upload` |
+| `--max-failed` | Batch mode: exit non-zero if more than N images failed. By default a batch exits non-zero only when *every* image failed. `--max-failed 0` fails the run on any error at all. Rejected outside batch mode |
 | `--format` | Output format: `jp2` (default), `jpg`, `jpeg`, `png`, `tif`, `tiff`. Also selects which format is searched for/uploaded as the cached annotation |
 | `--downsample` | Downsample factor (default: 10) |
 | `--fs-map` | Path to a custom `fs_map` YAML (default: the bundled lab map) |
@@ -74,6 +76,29 @@ path) unless `--skip-upload` is given, so a later run at the same
 downsample+format hits tier 1. Only an existing annotation matching the
 requested format is ever replaced -- other formats sharing the namespace
 are left alone. `--regenerate` skips tier 1's lookup unconditionally.
+
+A tier that cannot deliver falls forward to the next rather than failing
+the image: a cached annotation that won't download, or a source file that
+won't decode, drops through. **Tier 2 -> tier 3 fallback is logged at
+`WARNING`** with the reason, because the run still succeeds while doing
+the slow thing every time.
+
+**Batch output and exit code.** A batch run ends with, at `INFO`:
+
+```
+Batch complete: 4478/4478 images processed, 0 failed.
+Served by tier: annotation=12, local=4466
+```
+
+`Served by tier` counts which tier actually produced each image, so a run
+whose local source silently stopped working shows `network=` for
+everything instead of looking identical to a healthy run. Images skipped
+via `--skip-existing` or an existing output file are counted as
+`skipped=`, not against a tier.
+
+A batch exits non-zero if **every** image failed, or if more than
+`--max-failed` did. Otherwise it exits 0 -- per-image errors are logged
+and the run continues.
 
 ### `lavlab roi <target>` -- pull ROI mask images
 

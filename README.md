@@ -131,6 +131,17 @@ just the cluster:**
    large slide) but works from any machine with just OMERO credentials --
    this is what makes `lr` usable off-cluster at all.
 
+A tier that cannot deliver falls forward to the next one rather than
+failing the image: an annotation that won't download, or a source file
+that won't decode (unreadable, truncated, or in a compression scheme the
+build has no codec for), drops through to the tier below. **Falling back
+from tier 2 to tier 3 is logged at `WARNING`** with the reason, because
+the run still "succeeds" while doing the slow thing for every image --
+if you see one of those per image, the mounted repository is not actually
+usable and the run is taking minutes per slide for nothing. Errors that
+indicate a bug in `lr` itself are deliberately *not* caught, so they still
+fail loudly instead of hiding behind a slow retry.
+
 Whatever tier 2 or 3 produces gets uploaded back to OMERO under the same
 `LargeRecon.${downsample}` namespace, as `LR${downsample}_${image
 name}.${format}` -- independent of wherever `-o` points locally -- so a
@@ -404,6 +415,26 @@ decode/encode DICOM pixel data. If you hit a similar "works from source,
 breaks in the compiled binary" issue with some other dependency, that's
 almost always this same class of problem: something doing dynamic/plugin
 imports Nuitka can't see statically.
+
+**`IMAGECODECS_NUITKA_FLAGS` is the second instance of that class.**
+`tifffile` parses a TIFF container but hands tile decompression to
+`imagecodecs`, which resolves each codec through a module-level
+`__getattr__` doing `importlib.import_module('.' + name, 'imagecodecs')`.
+Tier 2 (reading a source file off a mounted OMERO repository) needs this
+for the JPEG- and JPEG2000-compressed OME-TIFFs the lab actually stores;
+tier 3 never did, because the tile API returns already-decoded pixels.
+Two traps worth knowing if you extend the list:
+
+- On a failed import `imagecodecs` substitutes a **stub** that only raises
+  when the codec is called, so a wrongly-flagged build still imports and
+  launches cleanly and only dies at the first compressed tile.
+- Every codec extension `cimport`s `imagecodecs._shared_cython` at the C
+  level, with no Python `import` statement anywhere for Nuitka to follow.
+  Omit it and *all* the codecs fail, each reporting its own
+  `DelayedImportError` rather than the one shared cause.
+
+`tests/test_imaging.py` guards both: it asserts every flagged module still
+exists upstream, and decodes a file in each compression scheme.
 
 `LAVLAB_NUITKA_ARGS` (an environment variable) lets you pass additional
 raw Nuitka flags for a one-off build without editing the build scripts --

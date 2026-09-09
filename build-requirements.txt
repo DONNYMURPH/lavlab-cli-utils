@@ -3,6 +3,7 @@ Nuitka>=2.0
 numpy
 pyvips[binary]
 tifffile
+imagecodecs
 scikit-image
 PyYAML
 tqdm

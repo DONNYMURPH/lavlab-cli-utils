@@ -10,6 +10,7 @@ import contextlib
 import logging
 import multiprocessing
 import os
+from collections import Counter
 
 from lavlab.commands._shared import (
     add_common_output_args,
@@ -60,6 +61,14 @@ def add_parser(subparsers) -> None:
              "only the missing ones do real work. Incompatible with --regenerate.",
     )
     parser.add_argument(
+        "--max-failed", type=int, default=None, metavar="N",
+        help="Batch mode: exit non-zero if more than N images failed. By default "
+             "a batch exits non-zero only when *every* image failed, since one "
+             "bad slide in a few thousand shouldn't fail a scheduled run. Set "
+             "this to make the tolerance explicit (e.g. --max-failed 0 to fail "
+             "on any error at all).",
+    )
+    parser.add_argument(
         "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
         help="Output format when the filename isn't fixed by an explicit -o path "
              "(default: jp2). Also selects which format is searched for/uploaded as "
@@ -86,6 +95,14 @@ def _validate_args(args: argparse.Namespace) -> None:
             "error: --skip-local doesn't write anywhere, so -o has nothing to do; "
             "drop one or the other."
         )
+    if args.max_failed is not None:
+        if args.target != "batch":
+            raise SystemExit(
+                "error: --max-failed is a batch-mode tolerance; a single image "
+                "already exits non-zero when it fails."
+            )
+        if args.max_failed < 0:
+            raise SystemExit("error: --max-failed must be zero or greater.")
 
 
 def run(args: argparse.Namespace) -> None:
@@ -183,7 +200,7 @@ def _process_one(image_id: int):
 
             if args.skip_existing and has_cached_recon(image, args.downsample, args.format):
                 print(f"Image {image_id}: already has a large-recon, skipping.")
-                return (image_id, None)
+                return (image_id, None, None)
 
             group_id = group_of(conn, image)
             name = image.getName()
@@ -199,13 +216,13 @@ def _process_one(image_id: int):
                     return None
 
                 if os.path.exists(output_path) and not args.override:
-                    return (image_id, output_path)
+                    return (image_id, output_path, None)
 
             try:
-                _render_and_write(conn, image, args, output_path)
+                tier = _render_and_write(conn, image, args, output_path)
                 shown = "uploaded to OMERO (not stored locally)" if args.skip_local else output_path
                 print(f"Completed image {image_id}: {shown}")
-                return (image_id, None if args.skip_local else output_path)
+                return (image_id, None if args.skip_local else output_path, tier)
             finally:
                 if args.skip_local:
                     with contextlib.suppress(OSError):
@@ -220,6 +237,52 @@ def _process_one(image_id: int):
             log.exception("Image %d: unhandled error.", image_id)
             return None
     return None
+
+
+def _summarise_batch(image_ids, results, max_failed) -> None:
+    """Report what the batch achieved, and fail the run if it achieved nothing.
+
+    Split out from ``_run_batch`` so the reporting and exit-code rules can be
+    exercised without standing up a worker pool and an OMERO connection.
+
+    *results* holds one entry per image: ``None`` for a failure, otherwise
+    ``(image_id, output_path, tier)`` where *tier* is the tier that actually
+    served the image, or ``None`` if it was skipped without doing work.
+    """
+    completed = [r for r in results if r is not None]
+    failed = len(image_ids) - len(completed)
+
+    # Which tier actually served each image. Logged at INFO -- the default
+    # level, since -v only raises it to DEBUG -- so it lands in `kubectl
+    # logs` with a timestamp like every other run-level message. A run
+    # reporting success with network=<everything> is a run whose local
+    # source silently stopped working; without this line it looks identical
+    # to a healthy one.
+    tiers = Counter(r[2] for r in completed if r[2] is not None)
+    skipped = sum(1 for r in completed if r[2] is None)
+
+    log.info(
+        "Batch complete: %d/%d images processed, %d failed.",
+        len(completed), len(image_ids), failed,
+    )
+    if tiers or skipped:
+        parts = [f"{tier}={count}" for tier, count in sorted(tiers.items())]
+        if skipped:
+            parts.append(f"skipped={skipped}")
+        log.info("Served by tier: %s", ", ".join(parts))
+
+    # The exit code carries the outcome, so a scheduled run that accomplished
+    # nothing shows up as a failed Job rather than a green one.
+    if image_ids and not completed:
+        raise SystemExit(
+            f"error: all {len(image_ids)} images failed; see the per-image "
+            "errors above."
+        )
+    if max_failed is not None and failed > max_failed:
+        raise SystemExit(
+            f"error: {failed} of {len(image_ids)} images failed, over the "
+            f"--max-failed {max_failed} threshold."
+        )
 
 
 def _run_batch(args: argparse.Namespace) -> None:
@@ -242,5 +305,4 @@ def _run_batch(args: argparse.Namespace) -> None:
         log.info("Found %d images.", len(image_ids))
         results = list(pool.imap_unordered(_process_one, image_ids))
 
-    completed = [r for r in results if r is not None]
-    print(f"Batch complete: {len(completed)}/{len(image_ids)} images processed.")
+    _summarise_batch(image_ids, results, args.max_failed)

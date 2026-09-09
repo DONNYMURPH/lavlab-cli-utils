@@ -23,6 +23,25 @@ PYDICOM_NUITKA_FLAGS = [
     "--include-module=pydicom.pixels.encoders.pylibjpeg",
     "--include-package-data=pydicom",
 ]
+IMAGECODECS_NUITKA_FLAGS = [
+    "--include-module=imagecodecs._shared",
+    "--include-module=imagecodecs._shared_cython",
+    "--include-module=imagecodecs._imcd",
+    "--include-module=imagecodecs._jpeg8",
+    "--include-module=imagecodecs._ljpeg",
+    "--include-module=imagecodecs._jpegsof3",
+    "--include-module=imagecodecs._jpeg2k",
+    "--include-module=imagecodecs._ccitt",
+    "--include-module=imagecodecs._deflate",
+    "--include-module=imagecodecs._zlib",
+    "--include-module=imagecodecs._lzma",
+    "--include-module=imagecodecs._zstd",
+    "--include-module=imagecodecs._webp",
+    "--include-module=imagecodecs._png",
+    "--include-module=imagecodecs._lerc",
+    "--include-module=imagecodecs._jpegxr",
+    "--include-module=imagecodecs._jpegxl",
+]
 
 
 def omero_ice_modules() -> list[str]:
@@ -100,6 +119,7 @@ def main() -> None:
         "--include-package=lavlab",
         "--include-package-data=lavlab",
         *PYDICOM_NUITKA_FLAGS,
+        *IMAGECODECS_NUITKA_FLAGS,
         *[f"--include-module={name}" for name in omero_ice_modules()],
         str(project_dir / "lavlab" / "__main__.py"),
     ]
