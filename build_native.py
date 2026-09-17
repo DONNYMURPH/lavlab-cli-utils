@@ -43,6 +43,24 @@ IMAGECODECS_NUITKA_FLAGS = [
     "--include-module=imagecodecs._jpegxl",
 ]
 
+# scikit-image resolves its submodules through lazy_loader -- skimage/__init__.py
+# defines a module-level __getattr__ rather than importing them -- so
+# `from skimage import draw` is a *runtime* lookup that Nuitka's static import
+# following does not see. Every submodule the package touches has to be named
+# here or it is simply absent from the build, and the failure only shows up
+# when a command reaches for it at runtime on the user's machine.
+#
+# draw: lavlab/roi.py and lavlab/tiling.py (polygon rasterization).
+# color, filters, measure, morphology: lavlab/tiling.py (tissue mask and the
+# background margin).
+SKIMAGE_NUITKA_FLAGS = [
+    "--include-module=skimage.color",
+    "--include-module=skimage.draw",
+    "--include-module=skimage.filters",
+    "--include-module=skimage.measure",
+    "--include-module=skimage.morphology",
+]
+
 
 def omero_ice_modules() -> list[str]:
     """Find generated OMERO Ice modules that IceImport loads dynamically."""
@@ -120,6 +138,7 @@ def main() -> None:
         "--include-package-data=lavlab",
         *PYDICOM_NUITKA_FLAGS,
         *IMAGECODECS_NUITKA_FLAGS,
+        *SKIMAGE_NUITKA_FLAGS,
         *[f"--include-module={name}" for name in omero_ice_modules()],
         str(project_dir / "lavlab" / "__main__.py"),
     ]

@@ -17,7 +17,7 @@ import argparse
 import logging
 import sys
 
-from lavlab.commands import geojson, lr, meta, roi_cmd, seg
+from lavlab.commands import geojson, lr, meta, roi_cmd, seg, tile
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     lr.add_parser(subparsers)
     roi_cmd.add_parser(subparsers)
+    tile.add_parser(subparsers)
     meta.add_parser(subparsers)
     geojson.add_parser(subparsers)
     seg.add_parser(subparsers)

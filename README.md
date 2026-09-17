@@ -1,8 +1,9 @@
 # lavlab-cli-utils
 
 LavLab's CLI toolbox for OMERO: pulling large-recon and ROI mask images,
-moving QuPath GeoJSON annotations in and out of OMERO, filling in ROI
-metadata, and converting between DICOM SEG and NIfTI segmentation masks.
+cutting whole-slide images into training tiles, moving QuPath GeoJSON
+annotations in and out of OMERO, filling in ROI metadata, and converting
+between DICOM SEG and NIfTI segmentation masks.
 
 More documentation lives in [`docs/`](docs/index.md):
 [`docs/API.md`](docs/API.md) is the exhaustive flag-by-flag CLI reference
@@ -11,9 +12,9 @@ development conventions.
 
 ## Architecture, in brief
 
-One Python package, `lavlab`, with five subcommands
-(`lr`/`roi`/`meta`/`geojson`/`seg`) sharing common OMERO-connection and
-argparse plumbing:
+One Python package, `lavlab`, with six subcommands
+(`lr`/`roi`/`tile`/`meta`/`geojson`/`seg`) sharing common OMERO-connection
+and argparse plumbing:
 
 ```text
 lavlab/
@@ -22,6 +23,7 @@ lavlab/
 │   └── _shared.py            shared creds/output-path/connection helpers
 ├── geojson/                 GeoJSON<->OMERO conversion logic (no argparse in here)
 ├── seg.py                   DICOM SEG<->NIfTI conversion logic
+├── tiling.py                whole-slide tiling logic (no argparse in here)
 ├── omero_client.py, config.py, naming.py, imaging.py, roi.py, palettes.py
 └── data/                    bundled default config, loaded via importlib.resources
 ```
@@ -228,6 +230,136 @@ keeping it from mistaking a mask for a recon -- there's a regression test
 lookup additionally matches the whole filename, since `_annot` and
 `_exclude` masks legitimately share one namespace and differ only by
 suffix.
+
+### `lavlab tile` -- cut slides into training tiles
+
+```sh
+# one slide, chosen classes
+lavlab tile 12345 --roi -t G3 -t G4cg -t G4fg -t G5 --mpp 0.5 --size 224 -o ./tiles
+# one slide, every annotation
+lavlab tile 12345 --roi --all -o ./tiles
+# whole slide, tissue only (inference, or an unannotated slide)
+lavlab tile 12345 --whole --mpp 0.5 --size 224 -o ./tiles
+# a whole group
+lavlab tile batch -g 3 --workers 8 --roi --all --skip-existing -o ./tiles
+```
+
+Cuts fixed-size tiles for a Gleason-grade classifier. Exactly one of
+`--whole` or `--roi` is required; `--roi` additionally needs `--all` or at
+least one `-t/--text-filter` (which matches either a `textValue` or a class
+folder name, case-insensitively).
+
+**Scale.** `--mpp` (default `0.5`) is read against the image's own
+`getPixelSizeX`/`Y` to pick a pyramid level and a resize factor, so tiles
+from a 20x and a 40x scan come out at the same magnification. An image
+with no physical pixel size recorded is a hard error naming `--downsample
+N`, which sets the factor directly. The two are mutually exclusive.
+
+**Output layout**, with `X`/`Y` the tile's *level-0* top-left corner:
+
+```text
+<out>/<subject>/<slide_stem>/
+  <label>/<slide_stem>_x{X}_y{Y}.png     # --roi
+  whole/<slide_stem>_x{X}_y{Y}.png       # --whole
+  manifest.csv
+  tile_params.json
+```
+
+`<slide_stem>` comes from `naming.get_stem`, so it matches `lr`/`roi`
+output names. `<subject>` is the leading `N###` token of the image name
+(`N101_S08_HE` -> `N101`), used verbatim -- it is deliberately *not*
+translated to the on-disk subject directory, whose naming the bundled
+`fs_map` gets wrong in known ways. A name with no such token lands in
+`unknown_subject/` with a warning. `manifest.csv` is written to a temp file
+and renamed into place at the end, so an aborted run never leaves one that
+looks complete.
+
+**Which tiles get kept.** Everything is decided on one low-resolution
+thumbnail per slide -- tissue by Otsu on saturation, ROI coverage by
+rasterising the annotations and reading integral images -- and full-res
+pixels are only read for tiles that already passed. A 40x whole-mount grids
+to 80-100k tiles, so `--coords-only` (manifest only, no image files) is
+there for surveying a slide without materialising them. In order:
+
+- below `--tissue-thresh` (default `0.5`) tissue: dropped.
+- overlapping an exclusion ROI *at all*: dropped. `--exclude-text`
+  (repeatable, default `exclusion roi` -- the palette's own label) sets
+  which `textValue`s count, and it applies in `--whole` mode too.
+- at or above `--min-coverage` (default `0.5`) of one class: takes that
+  class, highest-covering one if several qualify.
+- otherwise, possibly benign -- see below.
+
+**The benign rule (`--roi` only).** Annotators mark *everything* on a slide
+they work on: cancer, atrophy, HGPIN, exclusions. So tissue that falls
+inside no ROI on an annotated slide is genuinely benign, and gets
+`--background-label` (default `benign`). Two guards keep that honest:
+
+- `--background-margin` (default `200` um) dilates the union of *every*
+  ROI on the slide -- including ones `-t` didn't select -- before the test,
+  so a tile straddling an annotation edge is dropped rather than called
+  benign.
+- A slide with **no ROIs at all** is unannotated, not benign. It is skipped
+  entirely and counted separately in the batch summary. `--no-background`
+  turns the whole rule off.
+
+Background still vastly outnumbers the graded classes, so
+`--max-background-tiles` (default `2000`) caps it per slide. `--max-tiles`
+and `--max-tiles-per-label` cap the rest. All three sample randomly under
+`--seed` (default `0`), so the same slide and settings yield the same
+tiles every time.
+
+`--whole` is deliberately separate from all of this: its output goes to a
+flat `whole/` folder and is never treated as a benign class. Use it for
+inference, or for slides nobody has annotated.
+
+**Pixel tiers.** Like `lr`, but with only two -- there is no cached-recon
+tier for tiles:
+
+1. **Local source file**, when OMERO's managed repository is mounted where
+   `tile` runs (true on the cluster, not on a workstation). Regions are
+   cropped straight out of the source pyramid with pyvips random access --
+   never a whole level into memory, since these slides reach ~220k x 260k.
+2. **OMERO's tile API**, otherwise. Only regions containing kept tiles are
+   fetched, batched a grid-band at a time rather than a round trip per
+   tile.
+
+The tier used is logged per slide and recorded in every manifest row. A
+local source that won't decode falls forward to the network tier with a
+`WARNING`, exactly as `lr` does.
+
+**JPEG-2000 sources** are a special case of that fall-forward: the bundled
+libvips has no jp2k loader, so random reads would go through Pillow, which
+decodes the entire codestream *per crop*. A bare `.jp2` source therefore
+falls forward to the network tier with a `WARNING` rather than grinding
+through 10^5 whole-file decodes. `--force-local` overrides it if you really
+want that.
+
+**Tier parity caveat.** Both tiers share one grid, one region-reader
+interface and one resize call, so the same slide and settings select the
+same tiles and the same pyramid level either way. What they cannot
+guarantee is bit-identical *pixels*: tier 2 reads the source file's own
+pyramid and tier 3 reads OMERO's, and for lossily-compressed levels those
+can differ by a quantization step. Don't mix tiers within one training set
+if that matters to you.
+
+**Class folders** come from a `{folder: [textValue aliases]}` YAML
+(`lavlab/data/default_tile_labels.yaml`, overridable with `--labels`),
+matched case-insensitively and trimmed. The default maps the palette's
+`G4CG`/`G4FG` spellings onto the `G4cg`/`G4fg` folders the classifier
+expects, and lists the non-Gleason palette labels (`Atrophy`, `HGPIN`,
+`Seminal_Vesicles`, `Vessel`, `Urethra`) so `--all` doesn't warn about
+them. With `--all`, an unmapped `textValue` becomes a sanitized folder of
+its own, warned about once per slide.
+
+**`--skip-existing`** skips slides whose `manifest.csv` and
+`tile_params.json` show a finished run with these same parameters. A slide
+tiled with *different* parameters is warned about and skipped too, rather
+than mixing two settings in one directory -- the global `--override` flag
+(before the subcommand: `lavlab --override tile ...`) re-tiles it.
+
+Batch mode matches `lr batch`/`roi batch`: per-slide failures warn and
+continue, and the run ends with per-tier, per-label and
+done/skipped/unannotated/failed totals, with the image IDs for each.
 
 ### `lavlab meta roi textvalue` -- backfill ROI comments from stroke color
 

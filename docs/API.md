@@ -19,8 +19,8 @@ Apply before the subcommand name:
 
 ### OMERO credential flags
 
-Every command that talks to OMERO (`lr`, `roi`, `meta`, `geojson`) accepts
-these, added via `lavlab/commands/_shared.py`'s `add_creds_args`:
+Every command that talks to OMERO (`lr`, `roi`, `tile`, `meta`, `geojson`)
+accepts these, added via `lavlab/commands/_shared.py`'s `add_creds_args`:
 
 | Flag | Env var fallback |
 |---|---|
@@ -131,6 +131,154 @@ Exactly one of `--all` or at least one `--text-filter` is required.
 `--palette`'s output is exact integer label values (`0`, `1`, `2`, ...);
 `jpg`/`jpeg`'s lossy compression would silently corrupt them, so that
 combination is a hard error rather than a quietly-wrong file.
+
+### `lavlab tile <target>` -- cut slides into training tiles
+
+```
+lavlab tile <image-id | batch> -o DIR (--whole | --roi)
+                                [-a | -t TEXT ...]
+                                [--mpp UM | --downsample N]
+                                [--size N] [--overlap N]
+                                [--min-coverage F] [--tissue-thresh F]
+                                [--format png|jpg] [--coords-only]
+                                [--labels PATH] [--exclude-text TEXT ...]
+                                [--background-label NAME | --no-background]
+                                [--background-margin UM]
+                                [--max-background-tiles N]
+                                [--max-tiles N] [--max-tiles-per-label N]
+                                [--seed N] [--force-local] [--skip-existing]
+                                [-g GROUP] [--workers N] [creds...]
+```
+
+| Flag | Meaning |
+|---|---|
+| `target` (positional) | An OMERO image ID, or the literal `batch` |
+| `-o`, `--out` | Output root directory. **Required** |
+| `--whole` | Tile the whole slide (tissue only) under a flat `whole/` label. Exactly one of `--whole`/`--roi` is required |
+| `--roi` | Tile inside ROIs, labelling each tile by the annotation it falls in |
+| `-a`, `--all` | `--roi`: include every annotation regardless of `textValue`. Rejected together with `-t` |
+| `-t`, `--text-filter` | `--roi`: whitelist a `textValue` *or* a class folder name (repeatable, case-insensitive). One of `-t`/`--all` is required with `--roi`; both are rejected with `--whole` |
+| `--mpp` | Target micrometres per pixel (default: `0.5`), resolved against the image's `getPixelSizeX`/`Y`. Errors out if the image records no pixel size |
+| `--downsample` | Explicit level-0-pixels-per-output-pixel factor, instead of `--mpp`. Mutually exclusive with it, and the only option for an image with no pixel size |
+| `--size` | Tile edge in output pixels (default: `224`) |
+| `--overlap` | Overlap between neighbours in output pixels; stride is `size - overlap` (default: `0`). Must satisfy `0 <= overlap < size` |
+| `--min-coverage` | `--roi`: fraction of a tile that must lie inside one class's ROI area for it to take that class (default: `0.5`). Highest-covering qualifying class wins; exact ties break by folder name |
+| `--tissue-thresh` | Minimum tissue fraction to keep a tile, in both modes (default: `0.5`) |
+| `--format` | Tile format: `png` (default) or `jpg`. Rejected with `--coords-only` |
+| `--coords-only` | Write only `manifest.csv` and `tile_params.json`, no image files |
+| `--labels` | Custom `{folder: [aliases]}` YAML (default: the bundled `lavlab/data/default_tile_labels.yaml`) |
+| `--exclude-text` | `textValue` marking an exclusion region; any tile overlapping one *at all* is dropped, in both modes (repeatable, default: `exclusion roi`) |
+| `--background-label` | `--roi`: folder for tissue inside no ROI on an annotated slide (default: `benign`). Rejected with `--whole` and with `--no-background` |
+| `--no-background` | `--roi`: emit no background tiles. Rejected with `--whole` |
+| `--background-margin` | `--roi`: keep background tiles this many micrometres clear of every ROI (default: `200`). Rejected with `--whole` |
+| `--max-background-tiles` | `--roi`: per-slide cap on background tiles, randomly sampled (default: `2000`). Rejected with `--whole` |
+| `--max-tiles` | Per-slide cap across all labels, randomly sampled |
+| `--max-tiles-per-label` | Per-slide, per-class cap, randomly sampled |
+| `--seed` | Seed for every random sample (default: `0`) |
+| `--force-local` | Read a JPEG-2000 source locally instead of falling forward to the network tier |
+| `--skip-existing` | Skip slides already tiled with these same parameters. A slide tiled with different parameters is warned about and skipped; the global `--override` re-tiles it |
+| `-g`, `--group` | OMERO group ID -- batch mode only |
+| `--workers` | Parallel workers for batch mode (default: 8) |
+
+**Scale and level selection** (`lavlab/tiling.py::resolve_total_downsample`,
+`::select_level`). `ds_total = mpp / pixel_size` is the level-0 pixels per
+output pixel. The grid is built in *target* coordinates and each cell
+mapped back to level-0 for the manifest; cells that would run off the edge
+are dropped rather than padded, so every tile written is exactly `--size`
+square. The pyramid level read is the smallest one still at or above the
+target resolution, so the final resize is always a downsample -- the same
+rule `lavlab/imaging.py` and `lavlab/omero_tiles.py` use. A target finer
+than the slide was scanned at is an error, not a silent upsample.
+
+**Output layout.** `X`/`Y` are the tile's level-0 top-left corner:
+
+```text
+<out>/<subject>/<slide_stem>/
+  <label>/<slide_stem>_x{X}_y{Y}.png     # --roi
+  whole/<slide_stem>_x{X}_y{Y}.png       # --whole
+  manifest.csv
+  tile_params.json
+```
+
+`<slide_stem>` is `lavlab.naming.get_stem(image_name)`. `<subject>` is the
+leading `N###` token of the image name, upper-cased and used verbatim
+(`N101_S08_HE.ome.tiff` -> `N101`, `N101_LeftLobe_HE_Biopsy.ome.tiff` ->
+`N101`); it is deliberately not translated to the on-disk subject
+directory, since the bundled `fs_map` has known bugs there. A name without
+such a token goes to `unknown_subject/` with a warning.
+
+**`manifest.csv` columns**, in order: `image_id`, `subject`, `slide_stem`,
+`label`, `path`, `x0`, `y0`, `w0`, `h0`, `level`, `mpp`, `size`,
+`coverage`, `tissue_frac`, `roi_id`, `tier`. `path` is relative to `<out>`,
+and empty under `--coords-only`. `x0`/`y0`/`w0`/`h0` are level-0 pixels;
+`level` is the pyramid level actually read. The file is written to a temp
+sibling and renamed into place only once every tile is written, so a
+crashed run leaves no manifest that `--skip-existing` would trust.
+
+**`tile_params.json`** records the lavlab version, a UTC timestamp, every
+output-affecting parameter (including the background label, margin, caps
+and seed), plus the tier, level and per-label counts for that run.
+`--skip-existing` compares only the parameter block -- version and
+timestamp are ignored, and `-t`/`--exclude-text` values compare
+order- and case-insensitively.
+
+**Filter order** (`lavlab/tiling.py::assign_labels`): tissue threshold,
+then exclusions (any overlap at all), then class coverage, then the
+background rule. Everything is evaluated at analysis resolution (~8 samples
+across a tile) from one thumbnail per slide, with per-label integral images
+making each tile an O(1) lookup; full-resolution pixels are only read for
+tiles that already passed every filter.
+
+**The benign rule** (`--roi` only). Annotators mark everything on a slide
+they work on, so tissue inside no ROI on an *annotated* slide is benign.
+The union of **every** ROI on the slide -- not just those `-t` selected --
+is dilated by `--background-margin` before the test, so tiles straddling an
+annotation edge are dropped rather than mislabelled. A slide with no ROIs
+at all is treated as unannotated, not benign: it is skipped and counted
+separately. `--whole` output goes to `whole/` and is never treated as a
+benign class.
+
+**Pixel tiers.** Two, not three -- there is no cached-annotation tier for
+tiles:
+
+1. **Local source file**, when the managed repository is mounted where
+   `tile` runs. Regions are cropped from the source pyramid via pyvips
+   random access; levels are addressed as `[page=N]` or
+   `[page=0,subifd=N-1]` depending on whether the file stores its pyramid
+   as pages (SVS) or SubIFDs (OME-TIFF), verified against the dimensions
+   tifffile reports.
+2. **OMERO's tile API**, otherwise. Only regions containing kept tiles are
+   fetched, batched one grid-band at a time across several parallel
+   raw-pixels stores.
+
+A local source that will not decode falls forward to the network tier at
+`WARNING`, as in `lr`. A bare `.jp2` source is treated the same way up
+front: the bundled libvips has no jp2k loader, so random access would fall
+to Pillow decoding the whole codestream per crop. `--force-local`
+overrides.
+
+Both tiers go through one grid, one region-reader interface and one
+`resize_tile` call, so they select the same tiles and the same level.
+They do **not** guarantee bit-identical pixels: tier 2 reads the source
+file's pyramid and tier 3 reads OMERO's, which can differ by a
+quantization step on lossily-compressed levels.
+
+**Batch output and exit code.** A batch run ends with, at `INFO`:
+
+```
+Batch complete: 120/128 slides tiled, 4 skipped, 3 unannotated, 1 failed.
+Served by tier: local=118, network=2
+Tiles by label: G3=41022, G4cg=8871, G4fg=9310, G5=2204, benign=240000
+Total tiles: 301407
+Skipped image IDs: 331, 402, 417, 588
+Unannotated (no ROIs) image IDs: 209, 640, 641
+Failed image IDs: 512
+```
+
+The per-label line matters as much as the per-slide one: a run that
+"succeeded" on every slide while producing no `G5` tiles at all is a broken
+run, and only that line shows it. A batch exits non-zero only if *every*
+image failed; per-image errors are logged and the run continues.
 
 ### `lavlab meta roi textvalue <text_mapping> [image_ids...]`
 

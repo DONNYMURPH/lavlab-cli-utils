@@ -1,9 +1,10 @@
 # lavlab-cli-utils docs
 
 `lavlab-cli-utils` is LavLab's CLI toolbox for OMERO -- pulling large-recon
-and ROI mask images, filling in ROI metadata, moving QuPath GeoJSON
-annotations in and out of OMERO, and converting between DICOM SEG and
-NIfTI segmentation masks. It ships as a single `lavlab` command, either as
+and ROI mask images, cutting whole-slide images into training tiles,
+filling in ROI metadata, moving QuPath GeoJSON annotations in and out of
+OMERO, and converting between DICOM SEG and NIfTI segmentation masks. It
+ships as a single `lavlab` command, either as
 a self-contained [Nuitka](https://nuitka.net)-compiled binary (no Python
 environment needed on the target machine) or run directly from source.
 

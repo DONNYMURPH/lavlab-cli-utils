@@ -130,7 +130,7 @@ def run(args: argparse.Namespace) -> None:
     if args.image_ids:
         image_ids = args.image_ids
     elif args.group is not None:
-        pass  # resolved below, after connecting
+        pass
     else:
         raise SystemExit("error: specify one or more image IDs, or --group.")
 
