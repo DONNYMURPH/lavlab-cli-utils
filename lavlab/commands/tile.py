@@ -17,10 +17,6 @@ from lavlab.commands._shared import (
     parse_target,
 )
 
-# lavlab.tiling (numpy, pyvips, skimage, tifffile) and lavlab.omero_client
-# (omero-py, Ice) are imported inside the functions that use them, so that
-# building the argument parser -- and therefore --help -- stays pure Python.
-
 log = logging.getLogger(__name__)
 
 DEFAULT_MPP = 0.5
@@ -321,8 +317,6 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         conn.close()
 
 
-# Per-worker state, populated by the pool initializer since Pool.imap only
-# forwards a single positional argument to the worker function.
 _WORKER_STATE: dict = {}
 
 
@@ -353,12 +347,6 @@ def _process_one(image_id: int):
             if image is None:
                 log.warning("Image %d not found, skipping.", image_id)
                 return SlideResult(image_id, "failed", reason="not found")
-
-            # Always switch the connection into the image's own group --
-            # args.group only scopes which images iter_image_ids() listed,
-            # it doesn't substitute for group_of()'s side effect of setting
-            # SERVICE_OPTS, which tier 3's stateful raw-pixels store needs.
-            # Same fix/comment as in lavlab/commands/lr.py.
             group_of(conn, image)
             return _tile_one(conn, image, args, params)
         except TilingError as exc:
@@ -422,8 +410,6 @@ def _summarise_batch(image_ids, results) -> None:
         if ids:
             log.info("%s image IDs: %s", heading, ids)
 
-    # The exit code carries the outcome, so a scheduled run that accomplished
-    # nothing shows up as a failed Job rather than a green one.
     if image_ids and failed == len(image_ids):
         raise SystemExit(
             f"error: all {len(image_ids)} images failed; see the per-image errors above."
@@ -431,20 +417,10 @@ def _summarise_batch(image_ids, results) -> None:
 
 
 def _run_batch(args: argparse.Namespace) -> None:
-    # Importing omero_client is not Ice *usage*, and this is no earlier than
-    # the module-level import it replaced, so the fork-before-Ice ordering
-    # this function depends on is unchanged.
     from lavlab.omero_client import iter_image_ids
 
     params = _build_params(args)
     log.info("Starting %d workers.", args.workers)
-
-    # Fork the worker pool before this (parent) process ever touches
-    # OMERO/Ice -- see the comment in lavlab/commands/lr.py's _run_batch for
-    # the confirmed root cause (fork() after any Ice usage in the forking
-    # process, even a closed connection, breaks every child's own subsequent
-    # Ice usage -- source retries-and-fails, compiled Nuitka onefile
-    # segfaults). Fork first, while this process is still Ice-virgin.
     ctx = multiprocessing.get_context("fork")
     with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args, params)) as pool:
         conn = connect_from_args(args)

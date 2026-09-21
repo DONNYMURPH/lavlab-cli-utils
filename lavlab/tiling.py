@@ -77,25 +77,12 @@ class UnreadableSourceError(TilingError):
     exactly like ``large_recon``'s local-source handling.
     """
 
-
-#: Samples across one tile edge at analysis resolution. 8x8 per tile is
-#: enough to resolve a 0.5 coverage threshold to ~1.5% while keeping the
-#: analysis image ~3000x4000 for a 40x whole-mount.
 SUBSAMPLES_PER_TILE = 8
 
-#: ``textValue``s treated as exclusions rather than classes. Matches the
-#: "Exclusion ROI" entry in lavlab/palettes.py's default palette, which is
-#: what `lavlab meta roi textvalue` writes onto red-stroked shapes.
 DEFAULT_EXCLUDE_TEXT = ("exclusion roi",)
 
-#: Default folder for tiles that are tissue but inside no ROI at all, on a
-#: slide that *has* ROIs. See :func:`assign_labels` for why that is benign.
 DEFAULT_BACKGROUND_LABEL = "benign"
 
-#: Bare JPEG-2000 sources. The bundled libvips has no jp2k loader, so these
-#: fall back to Pillow, which decodes the entire codestream per crop --
-#: unusable for 10^5 random reads. Treated as "local tier can't serve this"
-#: unless the caller insists with force_local.
 JP2_SUFFIXES = (".jp2", ".j2k", ".jpf", ".jpx", ".jpc")
 
 MANIFEST_NAME = "manifest.csv"
@@ -107,19 +94,12 @@ MANIFEST_COLUMNS = (
     "coverage", "tissue_frac", "roi_id", "tier",
 )
 
-#: Folder every ``--whole`` tile is written to. Deliberately not a class
-#: name: whole-slide output is for inference or unannotated slides, and
-#: must never be confused with the benign class.
 WHOLE_LABEL = "whole"
 
 _UNKNOWN_SUBJECT = "unknown_subject"
 _SUBJECT_RE = re.compile(r"^(N\d+)(?=_)", re.IGNORECASE)
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
-
-# --------------------------------------------------------------------------
-# naming
-# --------------------------------------------------------------------------
 
 
 def subject_from_image_name(image_name: str) -> Optional[str]:
@@ -174,11 +154,6 @@ def sanitize_label(text: str) -> str:
     """
     cleaned = _UNSAFE_CHARS.sub("_", text.strip()).strip("._-")
     return cleaned or "unlabeled"
-
-
-# --------------------------------------------------------------------------
-# label map
-# --------------------------------------------------------------------------
 
 
 def _default_label_map_path() -> Path:
@@ -305,11 +280,6 @@ def selects_label(
     return text is not None and text.strip().lower() in wanted
 
 
-# --------------------------------------------------------------------------
-# scale and pyramid level
-# --------------------------------------------------------------------------
-
-
 def resolve_total_downsample(
     *,
     mpp: Optional[float] = None,
@@ -416,11 +386,6 @@ def select_level(
     )
 
 
-# --------------------------------------------------------------------------
-# grid
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class GridTile:
     """One grid cell, in both output and level-0 coordinates."""
@@ -481,9 +446,6 @@ def build_grid(
         while xt + size <= width_t:
             x0 = int(round(xt * ds_total))
             y0 = int(round(yt * ds_total))
-            # Rounding can push the last column/row one pixel past the
-            # edge; such a tile is dropped for the same reason a
-            # short one is.
             if x0 + tile0 <= width0 and y0 + tile0 <= height0:
                 tiles.append(GridTile(col, row, xt, yt, x0, y0, tile0, tile0))
             xt += stride
@@ -531,11 +493,6 @@ def tile_windows(
         np.maximum(np.rint(ws).astype(np.int64), 1),
         np.maximum(np.rint(hs).astype(np.int64), 1),
     )
-
-
-# --------------------------------------------------------------------------
-# coverage
-# --------------------------------------------------------------------------
 
 
 def integral_image(mask: np.ndarray) -> np.ndarray:
@@ -611,20 +568,11 @@ def tissue_mask(thumbnail: np.ndarray, min_object_px: int = 16) -> np.ndarray:
     else:
         grey = array if array.ndim == 2 else array[:, :, 0]
         signal = 1.0 - (grey.astype(np.float64) / 255.0)
-
-    # A blank (or single-valued) thumbnail has no threshold to find, and
-    # Otsu would happily return one that marks the whole slide as tissue.
     if float(signal.max() - signal.min()) < 1e-6:
         return np.zeros(signal.shape, dtype=bool)
 
     mask = signal > filters.threshold_otsu(signal)
     mask = np.asarray(morphology.closing(mask, morphology.disk(1)), dtype=bool)
-
-    # Speck removal is spelled out rather than done with
-    # morphology.remove_small_objects, whose min_size/max_size parameters
-    # changed meaning (and deprecation state) across skimage versions --
-    # this project pins no skimage version, and a silently inverted
-    # threshold here would quietly change which tiles get cut.
     if min_object_px > 1 and mask.any():
         components = measure.label(mask, connectivity=1)
         sizes = np.bincount(components.ravel())
@@ -690,22 +638,12 @@ def dilate_mask(mask: np.ndarray, radius_px: float) -> np.ndarray:
     radius = int(math.ceil(radius_px))
     if radius < 1 or not mask.any():
         return mask
-
-    # isotropic_dilation is the distance-transform implementation, which is
-    # far cheaper than a disk footprint at the radii a background margin
-    # produces; it only exists in newer scikit-image, and this project pins
-    # no version, so fall back to the footprint spelling that always has.
     isotropic = getattr(morphology, "isotropic_dilation", None)
     if isotropic is not None:
         return np.asarray(isotropic(mask, radius), dtype=bool)
     return np.asarray(
         morphology.dilation(mask, morphology.disk(radius)), dtype=bool
     )
-
-
-# --------------------------------------------------------------------------
-# labelling
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -923,11 +861,6 @@ def sample_records(
     return kept
 
 
-# --------------------------------------------------------------------------
-# pixel readers
-# --------------------------------------------------------------------------
-
-
 def _vips_to_numpy(image) -> np.ndarray:
     """Copy a pyvips image into a numpy array (uint8 only)."""
     memory = image.write_to_memory()
@@ -1088,13 +1021,6 @@ class NetworkRegionReader:
         :type store_count: int | None
         """
         from lavlab.omero_tiles import PARALLEL_STORE_COUNT
-
-        # _switch_group_before_stateful_service is private to omero_tiles,
-        # but it is the one correct way to do this: a stateful service
-        # opened under the dummy group (-1) fails, and it already handles
-        # the setGroupForSession/setSecurityContext fallback. Duplicating
-        # it here would mean two copies of a subtlety that has bitten this
-        # codebase before.
         from lavlab.omero_tiles import _switch_group_before_stateful_service
 
         self._conn = conn
@@ -1124,13 +1050,6 @@ class NetworkRegionReader:
                     f"pyramid level {plan.index} is out of range 0..{count - 1} "
                     f"for image {image.getId()}."
                 )
-            # getResolutionDescriptions() is ordered full-res first, but
-            # setResolutionLevel() numbers the other way round -- the same
-            # inversion omero_tiles.closest_resolution_level performs. The
-            # level is indexed explicitly rather than re-derived from a
-            # target size so that both tiers read the level that
-            # select_level() already picked, which is what makes their
-            # output comparable.
             self._level = count - 1 - plan.index
             rps.setResolutionLevel(self._level)
             tile_w, tile_h = rps.getTileSize()
@@ -1190,10 +1109,6 @@ class NetworkRegionReader:
     async def _gather(self, keys: Sequence[tuple[int, int]]) -> None:
         from lavlab.omero_asyncio import AsyncSession
         from lavlab.omero_tiles import merge_async_iters
-
-        # _get_session_factory is private for the same reason as the group
-        # switch above: it is the connection's own accessor, with a
-        # getSession() fallback, and a second copy would drift.
         from lavlab.omero_tiles import _get_session_factory
 
         tile_w, tile_h = self._tile_size
@@ -1300,11 +1215,6 @@ def _chunk(items: Sequence, count: int) -> list[list]:
     return [list(items[i:i + size]) for i in range(0, len(items), size)]
 
 
-# --------------------------------------------------------------------------
-# cutting
-# --------------------------------------------------------------------------
-
-
 def resize_tile(array: np.ndarray, size: int) -> np.ndarray:
     """Resize a read region to the output tile size.
 
@@ -1403,11 +1313,6 @@ def tile_filename(slide_stem: str, record: TileRecord, fmt: str) -> str:
     :rtype: str
     """
     return f"{slide_stem}_x{record.tile.x0}_y{record.tile.y0}.{fmt}"
-
-
-# --------------------------------------------------------------------------
-# parameters and manifest
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -1560,11 +1465,6 @@ def write_manifest(slide_dir: str, rows: Sequence[dict]) -> str:
             pass
         raise
     return final_path
-
-
-# --------------------------------------------------------------------------
-# orchestration
-# --------------------------------------------------------------------------
 
 
 @dataclass
