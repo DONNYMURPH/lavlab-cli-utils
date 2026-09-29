@@ -28,7 +28,7 @@ jobs:
       # One wheel per platform (py3-none-macosx_*_arm64 and
       # py3-none-manylinux_*_x86_64); the 3.12 legs build identical filenames.
       - name: Download macOS wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: lavlab-wheel-py3.11
           path: dist/
@@ -36,7 +36,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Linux wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: lavlab-wheel-linux-py3.11
           path: dist/
