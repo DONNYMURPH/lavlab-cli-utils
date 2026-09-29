@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 # A Nuitka --standalone build is a directory, not a single file: lavlab-bin
 # resolves its shared libraries through RPATH=$ORIGIN, so the whole dist has
 # to stay together.
