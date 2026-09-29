@@ -24,10 +24,14 @@ def test_load_color_mapping_missing_raises_file_not_found():
 
 def test_load_color_mapping_custom_yaml_rgb_and_hex(tmp_path):
     path = tmp_path / "palette.yaml"
-    path.write_text(yaml.safe_dump([
-        {"rgb": [10, 20, 30], "text": "Test Region"},
-        {"hex": "#00FF00", "text": "Green Region"},
-    ]))
+    path.write_text(
+        yaml.safe_dump(
+            [
+                {"rgb": [10, 20, 30], "text": "Test Region"},
+                {"hex": "#00FF00", "text": "Green Region"},
+            ]
+        )
+    )
 
     mapping = load_color_mapping(str(path))
 

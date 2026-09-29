@@ -13,7 +13,7 @@ environment needed on the target machine) or run directly from source.
 - **[../README.md](../README.md)** -- start here. Install instructions,
   every command with examples, the Docker build environment, and
   troubleshooting.
-- **[API.md](API.md)** -- exhaustive reference: every CLI flag, and the
+- **[reference.md](reference.md)** -- exhaustive reference: every CLI flag, and the
   importable Python API (`lavlab.geojson`, `lavlab.seg`) for use outside
   the CLI, e.g. from a notebook.
 - **[../CONTRIBUTING.md](../CONTRIBUTING.md)** -- setting up a dev

@@ -39,14 +39,22 @@ def make_temp_path(fmt: str) -> str:
 
 def add_creds_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-u", "--user", help="OMERO username (or set OMERO_USER).")
-    parser.add_argument("-w", "--password", help="OMERO password (or set OMERO_PASSWORD).")
+    parser.add_argument(
+        "-w", "--password", help="OMERO password (or set OMERO_PASSWORD)."
+    )
     parser.add_argument("-s", "--host", help="OMERO server host (or set OMERO_HOST).")
-    parser.add_argument("-p", "--port", type=int, help="OMERO server port (or set OMERO_PORT).")
+    parser.add_argument(
+        "-p", "--port", type=int, help="OMERO server port (or set OMERO_PORT)."
+    )
 
 
 def add_common_output_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--downsample", type=int, default=10, help="Downsample factor (default: 10).")
-    parser.add_argument("--fs-map", dest="fs_map", help="Path to a custom fs_map YAML file.")
+    parser.add_argument(
+        "--downsample", type=int, default=10, help="Downsample factor (default: 10)."
+    )
+    parser.add_argument(
+        "--fs-map", dest="fs_map", help="Path to a custom fs_map YAML file."
+    )
 
 
 def connect_from_args(args: argparse.Namespace):
@@ -55,7 +63,7 @@ def connect_from_args(args: argparse.Namespace):
     try:
         creds = resolve_creds(args.user, args.password, args.host, args.port)
     except ConfigError as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from None
     return connect(creds)
 
 
@@ -63,7 +71,7 @@ def load_fs_map_from_args(args: argparse.Namespace):
     try:
         return load_fs_map(args.fs_map)
     except ConfigError as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from None
 
 
 def parse_target(target: str) -> int | str:
@@ -75,7 +83,7 @@ def parse_target(target: str) -> int | str:
     except ValueError:
         raise SystemExit(
             f"error: expected an image ID or 'batch', got '{target}'"
-        )
+        ) from None
 
 
 def group_of(conn, obj) -> int:

@@ -24,7 +24,7 @@ try:
 except Exception as exc:  # pragma: no cover - environment-dependent
     pytest.skip(f"pyvips unavailable: {exc}", allow_module_level=True)
 
-from lavlab.omero_tiles import (  # noqa: E402
+from lavlab.omero_tiles import (
     _chunkify,
     closest_resolution_level,
     create_full_tile_list,
@@ -80,7 +80,9 @@ class _FakeRps:
         self.level_set = level
 
     def getTileSize(self):
-        assert self.level_set is not None, "getTileSize called before setResolutionLevel"
+        assert self.level_set is not None, (
+            "getTileSize called before setResolutionLevel"
+        )
         return self._tile_size
 
 
@@ -105,7 +107,12 @@ def test_create_tile_list_2d_clamps_edge_tiles_without_leaking_into_next_row():
     tiles = create_tile_list_2d(0, 0, 0, size_x=10, size_y=10, tile_size=(4, 4))
     coords = [t[3] for t in tiles]
     assert (8, 8, 2, 2) in coords  # bottom-right corner: both dims clamped
-    assert (0, 8, 4, 2) in coords  # bottom row, first tile: width NOT leaked from the corner clamp
+    assert (
+        0,
+        8,
+        4,
+        2,
+    ) in coords  # bottom row, first tile: width NOT leaked from the corner clamp
     assert (8, 0, 2, 4) in coords  # right column, first row: height NOT leaked
     for x, y, w, h in coords:
         assert x + w <= 10
@@ -113,7 +120,9 @@ def test_create_tile_list_2d_clamps_edge_tiles_without_leaking_into_next_row():
 
 
 def test_create_full_tile_list_concatenates_channels_not_interlaced():
-    tiles = create_full_tile_list([0], [0, 1, 2], [0], width=4, height=4, tile_size=(4, 4))
+    tiles = create_full_tile_list(
+        [0], [0, 1, 2], [0], width=4, height=4, tile_size=(4, 4)
+    )
     assert [t[1] for t in tiles] == [0, 1, 2]
 
 
@@ -145,14 +154,19 @@ def test_merge_async_iters_terminates_with_uneven_and_empty_producers():
     every producer had already finished (observed as all N chunk fetches
     completing and closing their stores, then an indefinite hang). If this
     test times out, that race is back."""
+
     async def run():
         producers = [
             _fake_tile_chunk([1, 2, 3]),
-            _fake_tile_chunk([]),  # an empty chunk, like len(tiles) < PARALLEL_STORE_COUNT
+            _fake_tile_chunk(
+                []
+            ),  # an empty chunk, like len(tiles) < PARALLEL_STORE_COUNT
             _fake_tile_chunk([4]),
             _fake_tile_chunk([5, 6, 7, 8, 9]),
         ]
-        result = await asyncio.wait_for(_collect(merge_async_iters(*producers)), timeout=2.0)
+        result = await asyncio.wait_for(
+            _collect(merge_async_iters(*producers)), timeout=2.0
+        )
         assert sorted(result) == list(range(1, 10))
 
     asyncio.run(run())

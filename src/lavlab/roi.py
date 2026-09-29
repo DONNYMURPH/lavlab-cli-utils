@@ -11,7 +11,6 @@ Rasterization uses scikit-image instead of OpenCV per project conventions.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from omero_model_EllipseI import EllipseI
@@ -55,7 +54,7 @@ def roi_namespace(downsample: int) -> str:
 
 
 def mask_annotation_name(
-    image_name: str, downsample: int, suffix: Optional[str], ext: str = "jp2"
+    image_name: str, downsample: int, suffix: str | None, ext: str = "jp2"
 ) -> str:
     """Return the canonical filename an uploaded mask is stored under.
 
@@ -94,7 +93,7 @@ def _find_mask_annotation(image, namespace: str, remote_name: str):
 
 
 def has_uploaded_mask(
-    image, downsample: int, suffix: Optional[str], ext: str = "jp2"
+    image, downsample: int, suffix: str | None, ext: str = "jp2"
 ) -> bool:
     """Return True if this exact mask is already attached to *image*.
 
@@ -112,11 +111,17 @@ def has_uploaded_mask(
     :rtype: bool
     """
     remote_name = mask_annotation_name(image.getName(), downsample, suffix, ext)
-    return _find_mask_annotation(image, roi_namespace(downsample), remote_name) is not None
+    return (
+        _find_mask_annotation(image, roi_namespace(downsample), remote_name) is not None
+    )
 
 
 def upload_mask(
-    conn, image, local_path: str, downsample: int, suffix: Optional[str],
+    conn,
+    image,
+    local_path: str,
+    downsample: int,
+    suffix: str | None,
     ext: str = "jp2",
 ) -> str:
     """Attach *local_path* to *image* as its ROI mask, replacing any previous
@@ -157,8 +162,11 @@ def upload_mask(
     return remote_name
 
 
-def _rectangle_perimeter(start: tuple[float, float], end: tuple[float, float],
-                          shape: Optional[tuple[int, int]] = None) -> tuple[np.ndarray, np.ndarray]:
+def _rectangle_perimeter(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    shape: tuple[int, int] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Dependency-free replacement for ``skimage.draw.rectangle_perimeter``.
 
     The installed skimage version gates that function behind a matplotlib
@@ -177,14 +185,22 @@ def _rectangle_perimeter(start: tuple[float, float], end: tuple[float, float],
     bottom_cols = np.arange(c1, c0 - 1, -1)
     left_rows = np.arange(r1, r0 - 1, -1)
 
-    rr = np.concatenate([
-        np.full(top_cols.shape, r0), right_rows,
-        np.full(bottom_cols.shape, r1), left_rows,
-    ])
-    cc = np.concatenate([
-        top_cols, np.full(right_rows.shape, c1),
-        bottom_cols, np.full(left_rows.shape, c0),
-    ])
+    rr = np.concatenate(
+        [
+            np.full(top_cols.shape, r0),
+            right_rows,
+            np.full(bottom_cols.shape, r1),
+            left_rows,
+        ]
+    )
+    cc = np.concatenate(
+        [
+            top_cols,
+            np.full(right_rows.shape, c1),
+            bottom_cols,
+            np.full(left_rows.shape, c0),
+        ]
+    )
 
     if shape is not None:
         valid = (rr >= 0) & (rr < shape[0]) & (cc >= 0) & (cc < shape[1])
@@ -226,8 +242,10 @@ def get_shapes_as_points(
     img_downsample: int = 1,
     roi_service=None,
     include_all: bool = False,
-    text_filter: Optional[list[str]] = None,
-) -> Optional[list[tuple[int, tuple[int, int, int], Optional[str], list[tuple[float, float]]]]]:
+    text_filter: list[str] | None = None,
+) -> (
+    list[tuple[int, tuple[int, int, int], str | None, list[tuple[float, float]]]] | None
+):
     """Gather Rectangles, Polygons, and Ellipses as shape id, RGB color, matched
     text label (lowercased, or None), and a list of (x, y) boundary points.
 
@@ -246,7 +264,9 @@ def get_shapes_as_points(
     for roi in get_rois(img, roi_service):
         for shape in roi.copyShapes():
             text_value = shape.getTextValue()
-            text_label = text_value.getValue().lower() if text_value is not None else None
+            text_label = (
+                text_value.getValue().lower() if text_value is not None else None
+            )
 
             if not include_all:
                 if text_label is None or text_label not in text_filter:
@@ -254,7 +274,7 @@ def get_shapes_as_points(
 
             points = None
 
-            if type(shape) == RectangleI:
+            if type(shape) is RectangleI:
                 x = float(shape.getX().getValue()) / img_downsample
                 y = float(shape.getY().getValue()) / img_downsample
                 w = float(shape.getWidth().getValue()) / img_downsample
@@ -264,7 +284,7 @@ def get_shapes_as_points(
                 # A dense pixel-by-pixel perimeter trace -- thinning it is harmless.
                 points = points[::point_downsample]
 
-            elif type(shape) == EllipseI:
+            elif type(shape) is EllipseI:
                 # draw.ellipse_perimeter's Cython implementation requires
                 # ints, not floats -- passing floats raises TypeError.
                 points = draw.ellipse_perimeter(
@@ -278,13 +298,16 @@ def get_shapes_as_points(
                 # Same as Rectangle: a dense perimeter trace, safe to thin.
                 points = points[::point_downsample]
 
-            elif type(shape) == PolygonI:
+            elif type(shape) is PolygonI:
                 point_str_arr = shape.getPoints()._val.split(" ")
                 xy = []
                 for coord_str in point_str_arr:
                     coord_list = coord_str.split(",")
                     xy.append(
-                        (float(coord_list[0]) / img_downsample, float(coord_list[1]) / img_downsample)
+                        (
+                            float(coord_list[0]) / img_downsample,
+                            float(coord_list[1]) / img_downsample,
+                        )
                     )
                 if xy:
                     points = xy
@@ -296,7 +319,8 @@ def get_shapes_as_points(
             else:
                 log.warning(
                     "Shape %d: unsupported shape type %s, skipping.",
-                    shape.getId()._val, type(shape).__name__,
+                    shape.getId()._val,
+                    type(shape).__name__,
                 )
 
             if points is not None:
@@ -310,7 +334,9 @@ def get_shapes_as_points(
     return sorted(shapes)
 
 
-def _fill_polygon(mask: np.ndarray, points_xy: list[tuple[float, float]], value) -> None:
+def _fill_polygon(
+    mask: np.ndarray, points_xy: list[tuple[float, float]], value
+) -> None:
     if len(points_xy) < 3:
         return
     xs = np.array([p[0] for p in points_xy])

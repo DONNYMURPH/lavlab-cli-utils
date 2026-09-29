@@ -1,35 +1,95 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.egg-info/
-.eggs/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+*$py.class
 
-# Build artifacts
+# Distribution / packaging
+dist/
 build/
-native/
-wheelhouse/
-lavlab/bin/
+*.egg-info/
+*.egg
+*.whl
+sdist/
 
 # Virtual environments
 .venv/
 venv/
+ENV/
 env/
 
-# Editors / OS
+# Hatch
+.hatch/
+
+# IDE / Editor
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Testing / Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
+
+# Documentation builds
+site/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Ruff
+.ruff_cache/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Secrets — never commit these
+*.pem
+*.key
+
+# Logs
+*.log
+
+# Type stubs
+.pytype/
+dmypy.json
+
+# Pre-commit
+.pre-commit-cache/
+
+# Misc
+*.bak
+*.tmp
+
+# --- lavlab-specific (carried over from the pre-taps .gitignore) ---
+
+# Nuitka build output: setup.py stages the standalone dist here, and
+# build_native.py writes to native/.
+src/lavlab/bin/
+native/
+wheelhouse/
+.eggs/
+
+# Local-only material. legacy/ notebooks contain real OMERO
+# usernames/hostnames (see .dockerignore).
 /legacy/
 /scripts/
 design.md
-vendor/*.whl
-.env
-.env.*
-*.pem
-*.key
+
+# OMERO credentials
 credentials*.json
 omero_user.txt
 secrets*.yaml

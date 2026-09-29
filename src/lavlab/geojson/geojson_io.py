@@ -172,8 +172,11 @@ def parse_classification(
 
 
 def _polygon_shapes_from_parts(
-    parts: list, name: str | None, color: tuple | None,
-    warnings: list[str], feature_id,
+    parts: list,
+    name: str | None,
+    color: tuple | None,
+    warnings: list[str],
+    feature_id,
 ) -> list[ShapeSpec]:
     shapes: list[ShapeSpec] = []
     bridged = 0
@@ -200,8 +203,11 @@ def _polygon_shapes_from_parts(
 
 
 def _geometry_to_shapes(
-    geometry: dict, name: str | None, color: tuple | None,
-    warnings: list[str], feature_id,
+    geometry: dict,
+    name: str | None,
+    color: tuple | None,
+    warnings: list[str],
+    feature_id,
 ) -> list[ShapeSpec]:
     """Convert one non-collection GeoJSON geometry into ShapeSpecs.
 
@@ -238,7 +244,9 @@ def _geometry_to_shapes(
             if not point or len(point) < 2:
                 warnings.append(f"feature {feature_id}: skipped a degenerate point")
                 continue
-            shapes.append(ShapeSpec(POINT, [list(point[:2])], name, color or DEFAULT_COLOR))
+            shapes.append(
+                ShapeSpec(POINT, [list(point[:2])], name, color or DEFAULT_COLOR)
+            )
         return shapes
 
     if geometry_type in ("LineString", "MultiLineString"):
@@ -286,7 +294,9 @@ def feature_to_annotation(feature: dict, warnings: list[str]) -> Annotation | No
     if geometry_type == "GeometryCollection":
         shapes: list[ShapeSpec] = []
         for sub_geometry in geometry.get("geometries") or []:
-            shapes.extend(_geometry_to_shapes(sub_geometry, name, color, warnings, feature_id))
+            shapes.extend(
+                _geometry_to_shapes(sub_geometry, name, color, warnings, feature_id)
+            )
     else:
         shapes = _geometry_to_shapes(geometry, name, color, warnings, feature_id)
 
@@ -370,7 +380,9 @@ def read_provenance(description: str | None) -> dict:
     return payload
 
 
-def _geometry_for_kind(kind: str, shapes: list[ShapeSpec], unbridge: bool) -> dict | None:
+def _geometry_for_kind(
+    kind: str, shapes: list[ShapeSpec], unbridge: bool
+) -> dict | None:
     """Combine same-kind shapes into a single GeoJSON geometry (no collection)."""
     if kind == POINT:
         usable = [s for s in shapes if s.points]
@@ -438,7 +450,9 @@ def shapes_to_geometry(shapes: list[ShapeSpec], unbridge: bool = True) -> dict |
 
     geometries = []
     for kind in sorted(kinds):
-        geometry = _geometry_for_kind(kind, [s for s in shapes if s.kind == kind], unbridge)
+        geometry = _geometry_for_kind(
+            kind, [s for s in shapes if s.kind == kind], unbridge
+        )
         if geometry is not None:
             geometries.append(geometry)
 

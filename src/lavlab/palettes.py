@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional
 
 import yaml
 
@@ -45,7 +44,7 @@ def _parse_hex(hex_str: str) -> tuple[int, int, int]:
 
 
 def _load_custom_palette(path: str) -> ColorMap:
-    with open(path, "r") as f:
+    with open(path) as f:
         if path.endswith(".json"):
             entries = json.load(f)
         else:
@@ -75,9 +74,15 @@ def load_color_mapping(name_or_path: str) -> ColorMap:
     return _load_custom_palette(name_or_path)
 
 
-def match_color(rgb: tuple[int, int, int], mapping: ColorMap, tolerance: int = 10) -> Optional[str]:
+def match_color(
+    rgb: tuple[int, int, int], mapping: ColorMap, tolerance: int = 10
+) -> str | None:
     r, g, b = rgb
     for (pr, pg, pb), label in mapping.items():
-        if abs(r - pr) <= tolerance and abs(g - pg) <= tolerance and abs(b - pb) <= tolerance:
+        if (
+            abs(r - pr) <= tolerance
+            and abs(g - pg) <= tolerance
+            and abs(b - pb) <= tolerance
+        ):
             return label
     return None

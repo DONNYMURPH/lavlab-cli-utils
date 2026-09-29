@@ -21,16 +21,22 @@ from lavlab.commands import geojson, lr, meta, roi_cmd, seg, tile
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="lavlab", description="LAVLab OMERO CLI utilities.")
+    parser = argparse.ArgumentParser(
+        prog="lavlab", description="LAVLab OMERO CLI utilities."
+    )
     parser.add_argument(
-        "--override", action="store_true", default=False,
+        "--override",
+        action="store_true",
+        default=False,
         help="Write over existing output files (default: False).",
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Enable DEBUG logging (very chatty -- logs a repr of every OMERO tile "
-             "response, which measurably slows a network large-recon fetch; leave "
-             "off unless you're diagnosing something).",
+        "response, which measurably slows a network large-recon fetch; leave "
+        "off unless you're diagnosing something).",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

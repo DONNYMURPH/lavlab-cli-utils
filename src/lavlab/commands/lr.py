@@ -32,47 +32,69 @@ log = logging.getLogger(__name__)
 
 
 def add_parser(subparsers) -> None:
-    parser = subparsers.add_parser("lr", help="Pull large-recon downsampled images from OMERO.")
-    parser.add_argument("target", help="An OMERO image ID, or 'batch' to pull all images.")
-    parser.add_argument("-o", "--output", help="Output file (single) or directory (batch).")
-    parser.add_argument("-g", "--group", type=int, help="OMERO group ID (batch mode only).")
-    parser.add_argument("--workers", type=int, default=8, help="Parallel workers for batch mode (default: 8).")
-    parser.add_argument(
-        "--regenerate", action="store_true",
-        help="Ignore any existing OMERO large-recon annotation and regenerate fresh, "
-             "re-uploading the result (combine with --override to also force "
-             "regeneration when the local output file already exists).",
+    parser = subparsers.add_parser(
+        "lr", help="Pull large-recon downsampled images from OMERO."
     )
     parser.add_argument(
-        "--skip-upload", action="store_true",
+        "target", help="An OMERO image ID, or 'batch' to pull all images."
+    )
+    parser.add_argument(
+        "-o", "--output", help="Output file (single) or directory (batch)."
+    )
+    parser.add_argument(
+        "-g", "--group", type=int, help="OMERO group ID (batch mode only)."
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="Parallel workers for batch mode (default: 8).",
+    )
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Ignore any existing OMERO large-recon annotation and regenerate fresh, "
+        "re-uploading the result (combine with --override to also force "
+        "regeneration when the local output file already exists).",
+    )
+    parser.add_argument(
+        "--skip-upload",
+        action="store_true",
         help="Don't upload the generated large-recon back to OMERO as an annotation.",
     )
     parser.add_argument(
-        "--skip-local", action="store_true",
+        "--skip-local",
+        action="store_true",
         help="Don't keep a local copy -- fetch/generate to a temporary file, upload it to "
-             "OMERO, then delete it. Incompatible with -o and with --skip-upload (that "
-             "combination would do nothing).",
+        "OMERO, then delete it. Incompatible with -o and with --skip-upload (that "
+        "combination would do nothing).",
     )
     parser.add_argument(
-        "--skip-existing", action="store_true",
+        "--skip-existing",
+        action="store_true",
         help="Skip any image that already has a large-recon annotation for this "
-             "downsample and format, without downloading or regenerating it. Useful for "
-             "backfilling a whole group: cached images cost one cheap existence check, "
-             "only the missing ones do real work. Incompatible with --regenerate.",
+        "downsample and format, without downloading or regenerating it. Useful for "
+        "backfilling a whole group: cached images cost one cheap existence check, "
+        "only the missing ones do real work. Incompatible with --regenerate.",
     )
     parser.add_argument(
-        "--max-failed", type=int, default=None, metavar="N",
+        "--max-failed",
+        type=int,
+        default=None,
+        metavar="N",
         help="Batch mode: exit non-zero if more than N images failed. By default "
-             "a batch exits non-zero only when *every* image failed, since one "
-             "bad slide in a few thousand shouldn't fail a scheduled run. Set "
-             "this to make the tolerance explicit (e.g. --max-failed 0 to fail "
-             "on any error at all).",
+        "a batch exits non-zero only when *every* image failed, since one "
+        "bad slide in a few thousand shouldn't fail a scheduled run. Set "
+        "this to make the tolerance explicit (e.g. --max-failed 0 to fail "
+        "on any error at all).",
     )
     parser.add_argument(
-        "--format", choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"], default="jp2",
+        "--format",
+        choices=["jp2", "jpg", "jpeg", "png", "tif", "tiff"],
+        default="jp2",
         help="Output format when the filename isn't fixed by an explicit -o path "
-             "(default: jp2). Also selects which format is searched for/uploaded as "
-             "an OMERO large-recon annotation.",
+        "(default: jp2). Also selects which format is searched for/uploaded as "
+        "an OMERO large-recon annotation.",
     )
     add_common_output_args(parser)
     add_creds_args(parser)
@@ -118,8 +140,12 @@ def _render_and_write(conn, image, args: argparse.Namespace, output_path: str) -
     from lavlab.large_recon import fetch_large_recon
 
     return fetch_large_recon(
-        conn, image, args.downsample, output_path,
-        regenerate=args.regenerate, skip_upload=args.skip_upload,
+        conn,
+        image,
+        args.downsample,
+        output_path,
+        regenerate=args.regenerate,
+        skip_upload=args.skip_upload,
     )
 
 
@@ -144,18 +170,30 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
             fs_map = load_fs_map_from_args(args)
             try:
                 output_path = resolve_output_path(
-                    args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=False
+                    args.output,
+                    fs_map,
+                    group_id,
+                    name,
+                    args.downsample,
+                    ext=args.format,
+                    batch=False,
                 )
             except ConfigError as exc:
-                raise SystemExit(f"error: {exc}")
+                raise SystemExit(f"error: {exc}") from None
 
             if os.path.exists(output_path) and not args.override:
-                print(f"Already exists, skipping (use --override to replace): {output_path}")
+                print(
+                    f"Already exists, skipping (use --override to replace): {output_path}"
+                )
                 return
 
         try:
             _render_and_write(conn, image, args, output_path)
-            shown = "uploaded to OMERO (not stored locally)" if args.skip_local else output_path
+            shown = (
+                "uploaded to OMERO (not stored locally)"
+                if args.skip_local
+                else output_path
+            )
             print(f"Completed image {image_id}: {shown}")
         finally:
             if args.skip_local:
@@ -198,7 +236,9 @@ def _process_one(image_id: int):
                 log.warning("Image %d not found, skipping.", image_id)
                 return None
 
-            if args.skip_existing and has_cached_recon(image, args.downsample, args.format):
+            if args.skip_existing and has_cached_recon(
+                image, args.downsample, args.format
+            ):
                 print(f"Image {image_id}: already has a large-recon, skipping.")
                 return (image_id, None, None)
 
@@ -209,10 +249,18 @@ def _process_one(image_id: int):
                 output_path = make_temp_path(args.format)
             else:
                 output_path = resolve_output_path(
-                    args.output, fs_map, group_id, name, args.downsample, ext=args.format, batch=True
+                    args.output,
+                    fs_map,
+                    group_id,
+                    name,
+                    args.downsample,
+                    ext=args.format,
+                    batch=True,
                 )
                 if output_path is None:
-                    log.warning("Image %d: no usable output directory, skipping.", image_id)
+                    log.warning(
+                        "Image %d: no usable output directory, skipping.", image_id
+                    )
                     return None
 
                 if os.path.exists(output_path) and not args.override:
@@ -220,7 +268,11 @@ def _process_one(image_id: int):
 
             try:
                 tier = _render_and_write(conn, image, args, output_path)
-                shown = "uploaded to OMERO (not stored locally)" if args.skip_local else output_path
+                shown = (
+                    "uploaded to OMERO (not stored locally)"
+                    if args.skip_local
+                    else output_path
+                )
                 print(f"Completed image {image_id}: {shown}")
                 return (image_id, None if args.skip_local else output_path, tier)
             finally:
@@ -263,7 +315,9 @@ def _summarise_batch(image_ids, results, max_failed) -> None:
 
     log.info(
         "Batch complete: %d/%d images processed, %d failed.",
-        len(completed), len(image_ids), failed,
+        len(completed),
+        len(image_ids),
+        failed,
     )
     if tiers or skipped:
         parts = [f"{tier}={count}" for tier, count in sorted(tiers.items())]
@@ -295,7 +349,9 @@ def _run_batch(args: argparse.Namespace) -> None:
     log.info("Starting %d workers.", args.workers)
 
     ctx = multiprocessing.get_context("fork")
-    with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args, fs_map)) as pool:
+    with ctx.Pool(
+        args.workers, initializer=_init_worker, initargs=(args, fs_map)
+    ) as pool:
         conn = connect_from_args(args)
         try:
             image_ids = list(iter_image_ids(conn, args.group))

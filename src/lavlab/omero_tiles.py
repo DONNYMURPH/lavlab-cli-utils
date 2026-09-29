@@ -1,15 +1,14 @@
 # SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
 #
 # SPDX-License-Identifier: MIT
-"""Generate a downsampled image purely over OMERO's tile API.
-"""
+"""Generate a downsampled image purely over OMERO's tile API."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Sequence
 from math import ceil
-from typing import AsyncIterator, Optional, Sequence
 
 import numpy as np
 import pyvips as pv
@@ -82,8 +81,9 @@ def closest_resolution_level(rps, target_xy: tuple[int, int]):
     return level, (level_w, level_h), (tile_w, tile_h)
 
 
-def create_tile_list_2d(z: int, c: int, t: int, size_x: int, size_y: int,
-                        tile_size: tuple[int, int]) -> list[Tile]:
+def create_tile_list_2d(
+    z: int, c: int, t: int, size_x: int, size_y: int, tile_size: tuple[int, int]
+) -> list[Tile]:
     """Build a tile-coordinate list for one (z, c, t) plane, clamped at the edges.
 
     :param size_x: Width of the plane being tiled (the *chosen resolution
@@ -105,9 +105,14 @@ def create_tile_list_2d(z: int, c: int, t: int, size_x: int, size_y: int,
     return tile_list
 
 
-def create_full_tile_list(z_indexes: Sequence[int], channels: Sequence[int],
-                          timepoints: Sequence[int], width: int, height: int,
-                          tile_size: tuple[int, int]) -> list[Tile]:
+def create_full_tile_list(
+    z_indexes: Sequence[int],
+    channels: Sequence[int],
+    timepoints: Sequence[int],
+    width: int,
+    height: int,
+    tile_size: tuple[int, int],
+) -> list[Tile]:
     """Concatenate :func:`create_tile_list_2d` across every (z, c, t) combination."""
     tile_list: list[Tile] = []
     for z in z_indexes:
@@ -122,21 +127,20 @@ def _chunkify(lst: Sequence, n: int) -> list[list]:
     if not lst:
         return []
     size = ceil(len(lst) / n)
-    return [list(lst[i * size:i * size + size]) for i in range(n)]
+    return [list(lst[i * size : i * size + size]) for i in range(n)]
 
 
 _DONE = object()
 
 
 def merge_async_iters(*aiters):
-    """Merge async generators via an asyncio.Queue.
-    """
+    """Merge async generators via an asyncio.Queue."""
     queue: asyncio.Queue = asyncio.Queue(1)
     cancelling = False
 
-    async def drain(aiter):
+    async def drain(source):
         try:
-            async for item in aiter:
+            async for item in source:
                 await queue.put((False, item))
         except Exception as e:
             if not cancelling:
@@ -165,14 +169,18 @@ def merge_async_iters(*aiters):
         for t in tasks:
             t.cancel()
 
-    tasks = [asyncio.create_task(drain(aiter)) for aiter in aiters]
+    tasks = [asyncio.create_task(drain(source)) for source in aiters]
     return merged()
 
 
-async def _fetch_tile_chunk(session, pixels_id: int, tiles: Sequence[Tile],
-                            level: Optional[int], bypass: bool = True) -> AsyncIterator[tuple[np.ndarray, Tile]]:
-    """Fetch one chunk of tiles from a single async RawPixelsStore.
-    """
+async def _fetch_tile_chunk(
+    session,
+    pixels_id: int,
+    tiles: Sequence[Tile],
+    level: int | None,
+    bypass: bool = True,
+) -> AsyncIterator[tuple[np.ndarray, Tile]]:
+    """Fetch one chunk of tiles from a single async RawPixelsStore."""
     rps = await session.createRawPixelsStore()
     closed = False
     try:
@@ -200,29 +208,40 @@ def _get_session_factory(conn):
     if sf is None and hasattr(conn.c, "getSession"):
         sf = conn.c.getSession()
     if sf is None:
-        raise LargeReconError("OMERO session factory unavailable; is the connection live?")
+        raise LargeReconError(
+            "OMERO session factory unavailable; is the connection live?"
+        )
     return sf
 
 
 def _switch_group_before_stateful_service(conn, image) -> None:
-    """Switch the session's security context before opening any stateful service.
-    """
+    """Switch the session's security context before opening any stateful service."""
     group_id = image.details.group.id.val
     if hasattr(conn, "setGroupForSession"):
         try:
             conn.setGroupForSession(group_id)
             return
         except Exception:
-            log.debug("setGroupForSession failed, falling back to raw setSecurityContext",
-                      exc_info=True)
+            log.debug(
+                "setGroupForSession failed, falling back to raw setSecurityContext",
+                exc_info=True,
+            )
     _get_session_factory(conn).setSecurityContext(image.details.group)
 
 
-async def _gather_tiles(conn, pixels_id: int, tiles: list[Tile], level: int,
-                        arr: np.ndarray, store_count: int) -> None:
+async def _gather_tiles(
+    conn,
+    pixels_id: int,
+    tiles: list[Tile],
+    level: int,
+    arr: np.ndarray,
+    store_count: int,
+) -> None:
     session = AsyncSession(_get_session_factory(conn))
     chunks = [chunk for chunk in _chunkify(tiles, store_count) if chunk]
-    jobs = [_fetch_tile_chunk(session, pixels_id, chunk, level, True) for chunk in chunks]
+    jobs = [
+        _fetch_tile_chunk(session, pixels_id, chunk, level, True) for chunk in chunks
+    ]
 
     total = len(tiles)
     # Report roughly 20 updates regardless of total tile count, so a
@@ -233,14 +252,17 @@ async def _gather_tiles(conn, pixels_id: int, tiles: list[Tile], level: int,
     log.info("Fetching %d tiles across %d parallel store(s)...", total, len(chunks))
 
     async for tile, (_z, c, _t, (x, y, w, h)) in merge_async_iters(*jobs):
-        arr[y:y + h, x:x + w, c] = tile
+        arr[y : y + h, x : x + w, c] = tile
         fetched += 1
         if fetched % log_every == 0 or fetched == total:
-            log.info("Fetched %d/%d tiles (%.0f%%).", fetched, total, 100 * fetched / total)
+            log.info(
+                "Fetched %d/%d tiles (%.0f%%).", fetched, total, 100 * fetched / total
+            )
 
 
-def generate_over_network(conn, image, downsample: int,
-                          store_count: int = PARALLEL_STORE_COUNT) -> pv.Image:
+def generate_over_network(
+    conn, image, downsample: int, store_count: int = PARALLEL_STORE_COUNT
+) -> pv.Image:
     """Build a downsampled recon of *image* purely over the OMERO tile API.
 
     :raises LargeReconError: if *image* isn't uint8, or generation is
@@ -252,8 +274,7 @@ def generate_over_network(conn, image, downsample: int,
         pass
     else:
         raise LargeReconError(
-            "generate_over_network() cannot be called from within a running "
-            "event loop."
+            "generate_over_network() cannot be called from within a running event loop."
         )
 
     pixels = image.getPrimaryPixels()
@@ -264,8 +285,10 @@ def generate_over_network(conn, image, downsample: int,
             "large-recon generation only supports uint8 (RGB) images."
         )
     if image.getSizeZ() > 1 or image.getSizeT() > 1:
-        log.warning("Image %d has multiple Z/T planes; only z=0, t=0 will be fetched.",
-                    image.getId())
+        log.warning(
+            "Image %d has multiple Z/T planes; only z=0, t=0 will be fetched.",
+            image.getId(),
+        )
 
     target_w, target_h = downsampled_xy(image, downsample)
 
@@ -275,7 +298,9 @@ def generate_over_network(conn, image, downsample: int,
     rps = conn.createRawPixelsStore()
     try:
         rps.setPixelsId(pixels_id, True)
-        level, (level_w, level_h), tile_size = closest_resolution_level(rps, (target_w, target_h))
+        level, (level_w, level_h), tile_size = closest_resolution_level(
+            rps, (target_w, target_h)
+        )
     finally:
         rps.close()
 
@@ -284,8 +309,11 @@ def generate_over_network(conn, image, downsample: int,
 
     nbytes = level_w * level_h * len(channels)
     if nbytes > _SIZE_WARN_BYTES:
-        log.warning("Image %d: allocating a %.1f GB array for tile assembly.",
-                    image.getId(), nbytes / 1024**3)
+        log.warning(
+            "Image %d: allocating a %.1f GB array for tile assembly.",
+            image.getId(),
+            nbytes / 1024**3,
+        )
 
     arr = np.zeros((level_h, level_w, len(channels)), dtype=np.uint8)
 

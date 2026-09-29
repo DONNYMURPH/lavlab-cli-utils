@@ -6,11 +6,11 @@ from __future__ import annotations
 import pytest
 
 try:
+    from omero.rtypes import rdouble, rint, rlong, rstring
     from omero_model_EllipseI import EllipseI
     from omero_model_LineI import LineI
     from omero_model_PolygonI import PolygonI
     from omero_model_RectangleI import RectangleI
-    from omero.rtypes import rdouble, rint, rlong, rstring
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"omero-py unavailable: {exc}", allow_module_level=True)
 
@@ -162,7 +162,11 @@ def test_get_shapes_as_points_text_filter_include_exclude():
     rs = _FakeRoiService([_FakeRoi([wanted, unwanted])])
 
     shapes = get_shapes_as_points(
-        image, img_downsample=1, roi_service=rs, include_all=False, text_filter=["tumor"]
+        image,
+        img_downsample=1,
+        roi_service=rs,
+        include_all=False,
+        text_filter=["tumor"],
     )
 
     assert shapes is not None
@@ -213,12 +217,18 @@ def test_get_shapes_as_points_rectangle_perimeter_is_downsampled():
     image = _FakeImage(size_x=100, size_y=100)
 
     full = get_shapes_as_points(
-        image, point_downsample=1, img_downsample=1,
-        roi_service=_FakeRoiService([_FakeRoi([rect_full])]), include_all=True,
+        image,
+        point_downsample=1,
+        img_downsample=1,
+        roi_service=_FakeRoiService([_FakeRoi([rect_full])]),
+        include_all=True,
     )
     thinned = get_shapes_as_points(
-        image, point_downsample=4, img_downsample=1,
-        roi_service=_FakeRoiService([_FakeRoi([rect_full])]), include_all=True,
+        image,
+        point_downsample=4,
+        img_downsample=1,
+        roi_service=_FakeRoiService([_FakeRoi([rect_full])]),
+        include_all=True,
     )
 
     full_points = full[0][3]
@@ -234,12 +244,16 @@ def test_get_shapes_as_points_unsupported_type_warns_and_skips(caplog):
     rs = _FakeRoiService([_FakeRoi([rect, line])])
 
     with caplog.at_level("WARNING"):
-        shapes = get_shapes_as_points(image, img_downsample=1, roi_service=rs, include_all=True)
+        shapes = get_shapes_as_points(
+            image, img_downsample=1, roi_service=rs, include_all=True
+        )
 
     assert shapes is not None
     assert [s[0] for s in shapes] == [1]
-    assert any("unsupported shape type" in r.message and "LineI" in r.message
-               for r in caplog.records)
+    assert any(
+        "unsupported shape type" in r.message and "LineI" in r.message
+        for r in caplog.records
+    )
 
 
 def test_get_shapes_as_points_no_shapes_returns_none():
@@ -251,9 +265,13 @@ def test_get_shapes_as_points_no_shapes_returns_none():
 def test_get_roi_mask_rgb_fills_rectangle_region(monkeypatch):
     rect = _rectangle(1, x=5, y=5, w=10, h=10, rgba=(10, 20, 30, 255))
     image = _FakeImage(size_x=20, size_y=20, size_c=3)
-    monkeypatch.setattr(roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([rect])])
+    monkeypatch.setattr(
+        roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([rect])]
+    )
 
-    mask, shape_count = get_roi_mask(image, downsample=1, include_all=True, text_filter=[], point_downsample=1)
+    mask, shape_count = get_roi_mask(
+        image, downsample=1, include_all=True, text_filter=[], point_downsample=1
+    )
 
     assert mask.shape == (20, 20, 3)
     assert tuple(mask[10, 10]) == (10, 20, 30)
@@ -264,7 +282,9 @@ def test_get_roi_mask_rgb_fills_rectangle_region(monkeypatch):
 def test_get_roi_mask_reports_count_matching_number_of_shapes(monkeypatch):
     shapes = [_rectangle(i, x=i, y=i, w=2, h=2) for i in range(5)]
     image = _FakeImage(size_x=50, size_y=50)
-    monkeypatch.setattr(roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi(shapes)])
+    monkeypatch.setattr(
+        roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi(shapes)]
+    )
 
     _, shape_count = get_roi_mask(image, downsample=1, include_all=True, text_filter=[])
 
@@ -275,7 +295,9 @@ def test_get_roi_mask_count_excludes_unsupported_shapes(monkeypatch):
     rect = _rectangle(1, x=0, y=0, w=5, h=5)
     line = _line(2)
     image = _FakeImage(size_x=50, size_y=50)
-    monkeypatch.setattr(roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([rect, line])])
+    monkeypatch.setattr(
+        roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([rect, line])]
+    )
 
     _, shape_count = get_roi_mask(image, downsample=1, include_all=True, text_filter=[])
 
@@ -286,11 +308,17 @@ def test_get_roi_mask_palette_numbers_by_text_filter_order(monkeypatch):
     a = _rectangle(1, x=0, y=0, w=5, h=5, text="a")
     b = _rectangle(2, x=10, y=10, w=5, h=5, text="b")
     image = _FakeImage(size_x=20, size_y=20)
-    monkeypatch.setattr(roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([a, b])])
+    monkeypatch.setattr(
+        roi_mod, "get_rois", lambda img, roi_service=None: [_FakeRoi([a, b])]
+    )
 
     mask, shape_count = get_roi_mask(
-        image, downsample=1, include_all=False, text_filter=["a", "b"],
-        palette=True, point_downsample=1,
+        image,
+        downsample=1,
+        include_all=False,
+        text_filter=["a", "b"],
+        palette=True,
+        point_downsample=1,
     )
 
     assert mask[2, 2] == 1
@@ -303,7 +331,9 @@ def test_get_roi_mask_no_shapes_returns_empty_array_and_zero_count(monkeypatch):
     image = _FakeImage(size_x=20, size_y=20)
     monkeypatch.setattr(roi_mod, "get_rois", lambda img, roi_service=None: [])
 
-    mask, shape_count = get_roi_mask(image, downsample=1, include_all=True, text_filter=[])
+    mask, shape_count = get_roi_mask(
+        image, downsample=1, include_all=True, text_filter=[]
+    )
 
     assert mask.size == 0
     assert shape_count == 0
@@ -360,7 +390,9 @@ class _FakeUploadConn:
     def deleteObject(self, obj):
         self.deleted.append(obj)
 
-    def createFileAnnfromLocalFile(self, path, origFilePathAndName=None, mimetype=None, ns=None):
+    def createFileAnnfromLocalFile(
+        self, path, origFilePathAndName=None, mimetype=None, ns=None
+    ):
         self.uploaded.append((path, origFilePathAndName, mimetype, ns))
         return _FakeFileAnnotation(origFilePathAndName or path)
 
@@ -376,7 +408,9 @@ def test_mask_annotation_name_includes_suffix():
 
 
 def test_has_uploaded_mask_true_when_present():
-    image = _FakeUploadImage(annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__annot.jp2")])
+    image = _FakeUploadImage(
+        annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__annot.jp2")]
+    )
     assert roi_mod.has_uploaded_mask(image, 10, "_annot", "jp2") is True
 
 
@@ -387,7 +421,9 @@ def test_has_uploaded_mask_false_when_absent():
 def test_has_uploaded_mask_is_suffix_specific():
     # _annot and _exclude masks share one namespace -- an _exclude upload
     # must not count as an _annot already being done.
-    image = _FakeUploadImage(annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__exclude.jp2")])
+    image = _FakeUploadImage(
+        annotations=[_FakeFileAnnotation("LR10_N101_S06_HE__exclude.jp2")]
+    )
     assert roi_mod.has_uploaded_mask(image, 10, "_exclude", "jp2") is True
     assert roi_mod.has_uploaded_mask(image, 10, "_annot", "jp2") is False
 

@@ -39,17 +39,23 @@ class _FakeFileAnnotation:
         chunks = [self._content[:4], self._content[4:]]
         for i, chunk in enumerate(chunks):
             if self._fail_after is not None and i == self._fail_after:
-                raise IOError("boom")
+                raise OSError("boom")
             yield chunk
 
 
 class _FakeImage:
-    def __init__(self, image_id=1, name="N101_S06_HE.ome.tiff",
-                 annotation=None, list_annotations=None):
+    def __init__(
+        self,
+        image_id=1,
+        name="N101_S06_HE.ome.tiff",
+        annotation=None,
+        list_annotations=None,
+    ):
         self._id = image_id
         self._name = name
         self._list_annotations = (
-            list(list_annotations) if list_annotations is not None
+            list(list_annotations)
+            if list_annotations is not None
             else ([annotation] if annotation is not None else [])
         )
         self.removed = []
@@ -80,7 +86,9 @@ class _FakeConn:
     def deleteObject(self, obj):
         self.deleted.append(obj)
 
-    def createFileAnnfromLocalFile(self, path, origFilePathAndName=None, mimetype=None, ns=None):
+    def createFileAnnfromLocalFile(
+        self, path, origFilePathAndName=None, mimetype=None, ns=None
+    ):
         if self._create_should_fail:
             raise RuntimeError("upload failed")
         self.uploaded.append((path, origFilePathAndName, mimetype, ns))
@@ -95,6 +103,7 @@ def _stub_write_recon(monkeypatch):
     def _write(img, output_path, lossless=True):
         with open(output_path, "wb") as fh:
             fh.write(b"generated")
+
     monkeypatch.setattr(large_recon, "write_recon", _write)
 
 
@@ -132,7 +141,9 @@ def test_annotation_tier_respects_requested_format(tmp_path, monkeypatch):
     assert out.read_bytes() == b"jpg-bytes"
 
 
-def test_upload_uses_canonical_remote_name_independent_of_local_path(tmp_path, monkeypatch):
+def test_upload_uses_canonical_remote_name_independent_of_local_path(
+    tmp_path, monkeypatch
+):
     image = _FakeImage(name="N101_S06_HE.ome.tiff", annotation=None)
     conn = _FakeConn()
 
@@ -193,7 +204,11 @@ def test_annotation_miss_legacy_jpg_falls_through_to_local(tmp_path, monkeypatch
     assert image.removed == []
     assert conn.deleted == []
     assert len(conn.uploaded) == 1
-    assert conn.uploaded[0][1:] == ("LR10_N101_S06_HE.jp2", "image/jp2", "LargeRecon.10")
+    assert conn.uploaded[0][1:] == (
+        "LR10_N101_S06_HE.jp2",
+        "image/jp2",
+        "LargeRecon.10",
+    )
 
 
 @pytest.mark.parametrize("src_path", [None, "/does/not/exist.tif"])
@@ -229,10 +244,16 @@ def test_regenerate_skips_valid_annotation(tmp_path, monkeypatch):
     assert image.removed == [ann]
     assert conn.deleted == [ann._obj]
     assert len(conn.uploaded) == 1
-    assert conn.uploaded[0][1:] == ("LR10_N101_S06_HE.jp2", "image/jp2", "LargeRecon.10")
+    assert conn.uploaded[0][1:] == (
+        "LR10_N101_S06_HE.jp2",
+        "image/jp2",
+        "LargeRecon.10",
+    )
 
 
-def test_upload_preserves_other_format_annotations_sharing_the_namespace(tmp_path, monkeypatch):
+def test_upload_preserves_other_format_annotations_sharing_the_namespace(
+    tmp_path, monkeypatch
+):
     # e.g. an older, manually-uploaded LR10_*.png sitting in the same
     # LargeRecon.10 namespace as a stale .jp2 this tool previously wrote.
     stale_jp2 = _FakeFileAnnotation("LR10_N101_S06_HE.jp2")
@@ -413,9 +434,12 @@ def test_local_read_failure_falls_back_to_network(tmp_path, monkeypatch, caplog,
 
 
 @pytest.mark.parametrize(
-    "exc", [AttributeError("'NoneType' has no attribute 'shape'"),
-            TypeError("unsupported operand"),
-            NameError("name 'foo' is not defined")],
+    "exc",
+    [
+        AttributeError("'NoneType' has no attribute 'shape'"),
+        TypeError("unsupported operand"),
+        NameError("name 'foo' is not defined"),
+    ],
 )
 def test_local_read_bug_is_not_masked_by_fallback(tmp_path, monkeypatch, exc):
     """Programming errors must propagate, not vanish into a slow retry."""
@@ -429,7 +453,9 @@ def test_local_read_bug_is_not_masked_by_fallback(tmp_path, monkeypatch, exc):
         fetch_large_recon(conn, image, 10, str(tmp_path / "out.jp2"))
 
 
-def test_successful_local_read_does_not_warn_or_hit_network(tmp_path, monkeypatch, caplog):
+def test_successful_local_read_does_not_warn_or_hit_network(
+    tmp_path, monkeypatch, caplog
+):
     image = _FakeImage(annotation=None)
     conn = _FakeConn()
     src = tmp_path / "src.ome.tiff"

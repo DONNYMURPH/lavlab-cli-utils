@@ -33,7 +33,7 @@ it's skipped, not failed, if the imaging stack isn't installed, so you can
 still run the suite without the full `dev` extra if you're only touching
 GeoJSON code.
 
-If you touch `lavlab/seg.py`, run the tests with the real imaging stack
+If you touch `src/lavlab/seg.py`, run the tests with the real imaging stack
 installed and pay attention to
 `test_nifti_to_dcmseg_round_trips_through_dcmseg_to_nifti` specifically --
 this module has already had real bugs that only a real round-trip test
@@ -44,15 +44,15 @@ just check that the function you touched doesn't raise.
 ## The command-group pattern
 
 Every CLI command group follows the same shape. If you're adding a new
-one, copy `lavlab/commands/roi_cmd.py` or `lavlab/commands/geojson.py` as
+one, copy `src/lavlab/commands/roi_cmd.py` or `src/lavlab/commands/geojson.py` as
 a template rather than inventing a new structure:
 
-1. **A logic module with no argparse in it** (`lavlab/roi.py`,
-   `lavlab/geojson/geojson_io.py`, `lavlab/seg.py`, ...) -- plain functions
+1. **A logic module with no argparse in it** (`src/lavlab/roi.py`,
+   `src/lavlab/geojson/geojson_io.py`, `src/lavlab/seg.py`, ...) -- plain functions
    that take plain arguments and either return a result or raise a
    specific exception. This is what makes the logic testable and usable
    from a notebook without going through the CLI at all.
-2. **A command module** (`lavlab/commands/<name>.py`) with:
+2. **A command module** (`src/lavlab/commands/<name>.py`) with:
    - `add_parser(subparsers) -> None` that registers the subcommand(s) and
      calls `parser.set_defaults(handler=run)` (or `run_<subaction>` for
      multiple nested subcommands, like `geojson.py`'s `import`/`export`).
@@ -64,9 +64,9 @@ a template rather than inventing a new structure:
      `run`/its helpers, not an uncaught exception. Let genuinely
      unexpected exceptions propagate uncaught -- don't swallow errors you
      don't understand.
-3. **Register it** in `lavlab/cli.py`: import the command module, call its
+3. **Register it** in `src/lavlab/cli.py`: import the command module, call its
    `add_parser(subparsers)` in `build_parser()`.
-4. If the command talks to OMERO, use `lavlab/commands/_shared.py`'s
+4. If the command talks to OMERO, use `src/lavlab/commands/_shared.py`'s
    `add_creds_args`/`connect_from_args` -- don't invent another
    `--server`/`--user`/`--password` flag set. Every OMERO-facing command
    group already shares this; don't reintroduce a split.
@@ -75,7 +75,7 @@ a template rather than inventing a new structure:
 
 - **Lazy `omero` imports.** Only modules that actually need `omero`
   import it, and only inside the functions that use it (see
-  `lavlab/geojson/omero_io.py`, `lavlab/omero_client.py`). This is what
+  `src/lavlab/geojson/omero_io.py`, `src/lavlab/omero_client.py`). This is what
   lets `--dry-run` modes and most of the test suite run on a machine with
   no OMERO/Ice installed at all. Don't move an `import omero` to module
   level "for convenience" -- it breaks that property for the whole import
@@ -83,7 +83,7 @@ a template rather than inventing a new structure:
 - **Docstrings** are Sphinx-style (`:param:`, `:type:`, `:raises:`,
   `:return:`, `:rtype:`), matching the rest of the codebase. Keep them
   factual and about the *why* where it's non-obvious (see almost any
-  docstring in `lavlab/geojson/geometry.py` for the bar to hit), not a
+  docstring in `src/lavlab/geojson/geometry.py` for the bar to hit), not a
   restatement of the function signature.
 - **Raise specific exceptions, not generic ones.** `FileNotFoundError` for
   a missing path, `ValueError` for bad/mismatched data, a custom exception
@@ -100,9 +100,9 @@ a template rather than inventing a new structure:
 
 ## Adding a new bundled default (fs_map, seg template, ...)
 
-Follow `lavlab/config.py`'s `_default_fs_map_path()` /
-`lavlab/seg.py`'s `_default_seg_template_path()` pattern: put the file in
-`lavlab/data/`, load it via `importlib.resources`, and add its extension
+Follow `src/lavlab/config.py`'s `_default_fs_map_path()` /
+`src/lavlab/seg.py`'s `_default_seg_template_path()` pattern: put the file in
+`src/lavlab/data/`, load it via `importlib.resources`, and add its extension
 pattern to `pyproject.toml`'s `[tool.setuptools.package-data]` so it
 actually ships in the wheel.
 

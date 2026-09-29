@@ -407,7 +407,9 @@ def test_assign_labels_picks_the_highest_coverage_label():
 def test_assign_labels_breaks_exact_ties_by_name_for_reproducibility():
     tiles = _grid(1)
     records, _ = assign_labels(
-        tiles, np.ones(1), {"G5": np.array([0.8]), "G3": np.array([0.8])},
+        tiles,
+        np.ones(1),
+        {"G5": np.array([0.8]), "G3": np.array([0.8])},
         min_coverage=0.5,
     )
 
@@ -417,8 +419,11 @@ def test_assign_labels_breaks_exact_ties_by_name_for_reproducibility():
 def test_assign_labels_drops_tiles_without_enough_tissue():
     tiles = _grid(2)
     records, stats = assign_labels(
-        tiles, np.array([0.9, 0.1, 0.6, 0.0]), {"G3": np.ones(4)},
-        min_coverage=0.5, tissue_thresh=0.5,
+        tiles,
+        np.array([0.9, 0.1, 0.6, 0.0]),
+        {"G3": np.ones(4)},
+        min_coverage=0.5,
+        tissue_thresh=0.5,
     )
 
     assert len(records) == 2
@@ -428,7 +433,9 @@ def test_assign_labels_drops_tiles_without_enough_tissue():
 def test_assign_labels_drops_any_tile_touching_an_exclusion():
     tiles = _grid(2)
     records, stats = assign_labels(
-        tiles, np.ones(4), {"G3": np.ones(4)},
+        tiles,
+        np.ones(4),
+        {"G3": np.ones(4)},
         exclude_fracs=np.array([0.0, 0.01, 0.5, 0.0]),
         min_coverage=0.5,
     )
@@ -440,8 +447,11 @@ def test_assign_labels_drops_any_tile_touching_an_exclusion():
 def test_assign_labels_records_the_covering_roi_id():
     tiles = _grid(1)
     records, _ = assign_labels(
-        tiles, np.ones(1), {"G3": np.array([1.0])},
-        roi_id_for=lambda index: 4242, min_coverage=0.5,
+        tiles,
+        np.ones(1),
+        {"G3": np.array([1.0])},
+        roi_id_for=lambda index: 4242,
+        min_coverage=0.5,
     )
 
     assert records[0].roi_id == 4242
@@ -453,9 +463,13 @@ def test_assign_labels_records_the_covering_roi_id():
 def test_background_labels_tissue_outside_every_roi():
     tiles = _grid(2)
     records, _ = assign_labels(
-        tiles, np.ones(4), {"G3": np.array([1.0, 0.0, 0.0, 0.0])},
+        tiles,
+        np.ones(4),
+        {"G3": np.array([1.0, 0.0, 0.0, 0.0])},
         background_fracs=np.array([1.0, 0.0, 0.0, 0.0]),
-        background_label="benign", has_rois=True, min_coverage=0.5,
+        background_label="benign",
+        has_rois=True,
+        min_coverage=0.5,
     )
 
     assert [r.label for r in records] == ["G3", "benign", "benign", "benign"]
@@ -465,9 +479,13 @@ def test_background_skipped_on_a_slide_with_no_rois():
     """An unannotated slide is not a benign slide."""
     tiles = _grid(2)
     records, stats = assign_labels(
-        tiles, np.ones(4), {},
+        tiles,
+        np.ones(4),
+        {},
         background_fracs=np.zeros(4),
-        background_label="benign", has_rois=False, min_coverage=0.5,
+        background_label="benign",
+        has_rois=False,
+        min_coverage=0.5,
     )
 
     assert records == []
@@ -478,9 +496,13 @@ def test_background_excludes_tiles_near_an_roi():
     tiles = _grid(2)
     # tile 1 sits inside the dilated margin, so it is neither G3 nor benign
     records, stats = assign_labels(
-        tiles, np.ones(4), {"G3": np.array([1.0, 0.1, 0.0, 0.0])},
+        tiles,
+        np.ones(4),
+        {"G3": np.array([1.0, 0.1, 0.0, 0.0])},
         background_fracs=np.array([1.0, 0.4, 0.0, 0.0]),
-        background_label="benign", has_rois=True, min_coverage=0.5,
+        background_label="benign",
+        has_rois=True,
+        min_coverage=0.5,
     )
 
     labels = {(r.tile.row, r.tile.col): r.label for r in records}
@@ -493,8 +515,12 @@ def test_background_excludes_tiles_near_an_roi():
 def test_background_can_be_turned_off():
     tiles = _grid(1)
     records, _ = assign_labels(
-        tiles, np.ones(1), {}, background_fracs=np.zeros(1),
-        background_label=None, has_rois=True,
+        tiles,
+        np.ones(1),
+        {},
+        background_fracs=np.zeros(1),
+        background_label=None,
+        has_rois=True,
     )
 
     assert records == []
@@ -503,7 +529,8 @@ def test_background_can_be_turned_off():
 def test_assign_whole_labels_keeps_every_tissue_tile_under_one_label():
     tiles = _grid(2)
     records, stats = assign_whole_labels(
-        tiles, np.array([1.0, 0.2, 0.9, 1.0]),
+        tiles,
+        np.array([1.0, 0.2, 0.9, 1.0]),
         exclude_fracs=np.array([0.0, 0.0, 0.3, 0.0]),
         tissue_thresh=0.5,
     )
@@ -527,10 +554,17 @@ def _analysis_thumbnail():
 
 def _analysis_params(**kw):
     base = dict(
-        mode="roi", include_all=True, mpp=1.0, size=8, overlap=0,
-        min_coverage=0.5, tissue_thresh=0.5,
-        background_label="benign", background_margin_um=4.0,
-        max_background_tiles=None, exclude_text=["exclusion roi"],
+        mode="roi",
+        include_all=True,
+        mpp=1.0,
+        size=8,
+        overlap=0,
+        min_coverage=0.5,
+        tissue_thresh=0.5,
+        background_label="benign",
+        background_margin_um=4.0,
+        max_background_tiles=None,
+        exclude_text=["exclusion roi"],
     )
     base.update(kw)
     return TileParams(**base)
@@ -545,8 +579,12 @@ def test_analyze_slide_labels_roi_margin_and_background():
     shapes = [_shape(7, _square_ring(16, 16, 32, 32), "g3")]
 
     records, _stats, has_rois = analyze_slide(
-        tiles, _analysis_thumbnail(), shapes, analysis_ds=1,
-        params=_analysis_params(), lookup=build_alias_lookup({"G3": ["g3"]}),
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=_analysis_params(),
+        lookup=build_alias_lookup({"G3": ["g3"]}),
         pixel_size_x=1.0,
     )
     labels = _labels_by_cell(records)
@@ -572,8 +610,13 @@ def test_analyze_slide_reports_no_rois_so_the_caller_can_skip():
     tiles = build_grid(80, 80, size=8, overlap=0, ds_total=1.0)
 
     records, _stats, has_rois = analyze_slide(
-        tiles, _analysis_thumbnail(), [], analysis_ds=1,
-        params=_analysis_params(), lookup={}, pixel_size_x=1.0,
+        tiles,
+        _analysis_thumbnail(),
+        [],
+        analysis_ds=1,
+        params=_analysis_params(),
+        lookup={},
+        pixel_size_x=1.0,
     )
 
     assert has_rois is False
@@ -590,14 +633,18 @@ def test_analyze_slide_drops_tiles_inside_an_exclusion_roi():
     ]
 
     records, stats, _ = analyze_slide(
-        tiles, _analysis_thumbnail(), shapes, analysis_ds=1,
-        params=_analysis_params(), lookup=build_alias_lookup({"G3": ["g3"]}),
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=_analysis_params(),
+        lookup=build_alias_lookup({"G3": ["g3"]}),
         pixel_size_x=1.0,
     )
     labels = _labels_by_cell(records)
 
-    assert (2, 2) not in labels          # covered by the exclusion
-    assert labels[(3, 3)] == "G3"        # the rest of the ROI survives
+    assert (2, 2) not in labels  # covered by the exclusion
+    assert labels[(3, 3)] == "G3"  # the rest of the ROI survives
     assert stats["dropped_excluded"] >= 1
 
 
@@ -606,9 +653,13 @@ def test_analyze_slide_exclusions_apply_in_whole_mode_too():
     shapes = [_shape(1, _square_ring(16, 16, 32, 32), "exclusion roi")]
 
     records, stats, _ = analyze_slide(
-        tiles, _analysis_thumbnail(), shapes, analysis_ds=1,
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
         params=_analysis_params(mode="whole", background_label=None),
-        lookup={}, pixel_size_x=1.0,
+        lookup={},
+        pixel_size_x=1.0,
     )
     labels = _labels_by_cell(records)
 
@@ -623,11 +674,18 @@ def test_analyze_slide_text_filter_selects_a_subset():
         _shape(1, _square_ring(16, 16, 32, 32), "g3"),
         _shape(2, _square_ring(40, 40, 56, 56), "g5"),
     ]
-    params = _analysis_params(include_all=False, text_filter=["g3"], background_label=None)
+    params = _analysis_params(
+        include_all=False, text_filter=["g3"], background_label=None
+    )
 
     records, _stats, _ = analyze_slide(
-        tiles, _analysis_thumbnail(), shapes, analysis_ds=1, params=params,
-        lookup=build_alias_lookup({"G3": ["g3"], "G5": ["g5"]}), pixel_size_x=1.0,
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=params,
+        lookup=build_alias_lookup({"G3": ["g3"], "G5": ["g5"]}),
+        pixel_size_x=1.0,
     )
 
     assert {r.label for r in records} == {"G3"}
@@ -640,13 +698,18 @@ def test_analyze_slide_background_still_respects_unselected_rois():
     params = _analysis_params(include_all=False, text_filter=["g3"])
 
     records, _stats, _ = analyze_slide(
-        tiles, _analysis_thumbnail(), shapes, analysis_ds=1, params=params,
-        lookup=build_alias_lookup({"G3": ["g3"], "G5": ["g5"]}), pixel_size_x=1.0,
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=params,
+        lookup=build_alias_lookup({"G3": ["g3"], "G5": ["g5"]}),
+        pixel_size_x=1.0,
     )
     labels = _labels_by_cell(records)
 
-    assert (6, 6) not in labels           # inside the unselected G5 ROI
-    assert labels[(1, 1)] == "benign"     # far from it
+    assert (6, 6) not in labels  # inside the unselected G5 ROI
+    assert labels[(1, 1)] == "benign"  # far from it
 
 
 # ---------------------------------------------------------------------------
@@ -677,9 +740,15 @@ def test_sample_records_caps_per_label():
 def test_sample_records_is_deterministic_for_a_seed():
     records = _records("benign", 50)
 
-    first = sample_records(records, max_background_tiles=7, background_label="benign", seed=3)
-    second = sample_records(records, max_background_tiles=7, background_label="benign", seed=3)
-    other = sample_records(records, max_background_tiles=7, background_label="benign", seed=4)
+    first = sample_records(
+        records, max_background_tiles=7, background_label="benign", seed=3
+    )
+    second = sample_records(
+        records, max_background_tiles=7, background_label="benign", seed=3
+    )
+    other = sample_records(
+        records, max_background_tiles=7, background_label="benign", seed=4
+    )
 
     assert [r.tile.x0 for r in first] == [r.tile.x0 for r in second]
     assert [r.tile.x0 for r in first] != [r.tile.x0 for r in other]
@@ -707,7 +776,7 @@ def test_sample_records_returns_row_major_order():
 
 
 def _row(**kw):
-    base = {column: "" for column in tiling.MANIFEST_COLUMNS}
+    base = dict.fromkeys(tiling.MANIFEST_COLUMNS, "")
     base.update(kw)
     return base
 
@@ -784,8 +853,12 @@ def test_read_tile_params_tolerates_a_corrupt_file(tmp_path, caplog):
 
 
 def test_tile_params_json_records_the_background_settings(tmp_path):
-    params = TileParams(background_label="benign", background_margin_um=200.0,
-                        max_background_tiles=2000, seed=7)
+    params = TileParams(
+        background_label="benign",
+        background_margin_um=200.0,
+        max_background_tiles=2000,
+        seed=7,
+    )
     write_params(str(tmp_path), params, tier="local")
 
     saved = json.loads((tmp_path / tiling.PARAMS_NAME).read_text())
@@ -851,14 +924,14 @@ class _BlockReader:
         out = np.zeros((height, width, self._array.shape[2]), dtype=np.uint8)
         for by in range(y // 64 * 64, y + height, 64):
             for bx in range(x // 64 * 64, x + width, 64):
-                block = self._array[by:by + 64, bx:bx + 64]
+                block = self._array[by : by + 64, bx : bx + 64]
                 sx0, sy0 = max(x, bx), max(y, by)
                 sx1 = min(x + width, bx + block.shape[1])
                 sy1 = min(y + height, by + block.shape[0])
                 if sx1 <= sx0 or sy1 <= sy0:
                     continue
-                out[sy0 - y:sy1 - y, sx0 - x:sx1 - x] = block[
-                    sy0 - by:sy1 - by, sx0 - bx:sx1 - bx
+                out[sy0 - y : sy1 - y, sx0 - x : sx1 - x] = block[
+                    sy0 - by : sy1 - by, sx0 - bx : sx1 - bx
                 ]
         return out
 
@@ -1032,7 +1105,9 @@ def test_force_local_overrides_the_jp2_fall_forward(tmp_path, monkeypatch):
 
 
 class _FakeImage:
-    def __init__(self, image_id=1, name="N101_S08_HE.ome.tiff", size=80, pixel_size=1.0):
+    def __init__(
+        self, image_id=1, name="N101_S08_HE.ome.tiff", size=80, pixel_size=1.0
+    ):
         self._id = image_id
         self._name = name
         self._size = size
@@ -1082,9 +1157,13 @@ def mocked_slide(monkeypatch, tmp_path):
     source = tmp_path / "src.ome.tiff"
     source.write_bytes(b"x")
 
-    monkeypatch.setattr(tiling, "choose_tier", lambda c, i, force_local=False: ("local", str(source)))
+    monkeypatch.setattr(
+        tiling, "choose_tier", lambda c, i, force_local=False: ("local", str(source))
+    )
     monkeypatch.setattr(tiling, "local_level_dims", lambda p: [(80, 80)])
-    monkeypatch.setattr(tiling, "_load_thumbnail_local", lambda p, d: _analysis_thumbnail())
+    monkeypatch.setattr(
+        tiling, "_load_thumbnail_local", lambda p, d: _analysis_thumbnail()
+    )
     monkeypatch.setattr(tiling, "LocalRegionReader", _FakeTileReader)
 
     def _shapes(image, **kwargs):
@@ -1123,7 +1202,9 @@ def test_tile_slide_writes_tiles_manifest_and_params(mocked_slide, tmp_path):
 
 
 @needs_omero
-def test_tile_slide_skips_an_unannotated_slide_in_roi_mode(mocked_slide, tmp_path, caplog):
+def test_tile_slide_skips_an_unannotated_slide_in_roi_mode(
+    mocked_slide, tmp_path, caplog
+):
     mocked_slide.value = []
     out = tmp_path / "out"
 
@@ -1141,7 +1222,10 @@ def test_tile_slide_whole_mode_tiles_an_unannotated_slide(mocked_slide, tmp_path
     out = tmp_path / "out"
 
     result = tiling.tile_slide(
-        None, _FakeImage(), _analysis_params(mode="whole", background_label=None), str(out)
+        None,
+        _FakeImage(),
+        _analysis_params(mode="whole", background_label=None),
+        str(out),
     )
 
     assert result.status == "done"
@@ -1163,7 +1247,9 @@ def test_tile_slide_coords_only_writes_no_images(mocked_slide, tmp_path):
     assert not (slide_dir / "G3").exists()
     rows = (slide_dir / tiling.MANIFEST_NAME).read_text().splitlines()[1:]
     assert rows
-    assert all(dict(zip(tiling.MANIFEST_COLUMNS, r.split(",")))["path"] == "" for r in rows)
+    assert all(
+        dict(zip(tiling.MANIFEST_COLUMNS, r.split(",")))["path"] == "" for r in rows
+    )
 
 
 @needs_omero
@@ -1179,7 +1265,9 @@ def test_tile_slide_skip_existing_honours_matching_params(mocked_slide, tmp_path
 
 
 @needs_omero
-def test_tile_slide_skip_existing_refuses_mismatched_params(mocked_slide, tmp_path, caplog):
+def test_tile_slide_skip_existing_refuses_mismatched_params(
+    mocked_slide, tmp_path, caplog
+):
     out = tmp_path / "out"
     tiling.tile_slide(None, _FakeImage(), _analysis_params(), str(out))
 
@@ -1199,8 +1287,12 @@ def test_tile_slide_override_retiles_mismatched_params(mocked_slide, tmp_path):
     tiling.tile_slide(None, _FakeImage(), _analysis_params(), str(out))
 
     result = tiling.tile_slide(
-        None, _FakeImage(), _analysis_params(size=16), str(out),
-        skip_existing=True, override=True,
+        None,
+        _FakeImage(),
+        _analysis_params(size=16),
+        str(out),
+        skip_existing=True,
+        override=True,
     )
 
     assert result.status == "done"
@@ -1209,7 +1301,9 @@ def test_tile_slide_override_retiles_mismatched_params(mocked_slide, tmp_path):
 
 
 @needs_omero
-def test_tile_slide_missing_pixel_size_raises_the_actionable_error(mocked_slide, tmp_path):
+def test_tile_slide_missing_pixel_size_raises_the_actionable_error(
+    mocked_slide, tmp_path
+):
     with pytest.raises(MissingPixelSizeError, match="--downsample"):
         tiling.tile_slide(
             None, _FakeImage(pixel_size=None), _analysis_params(), str(tmp_path / "out")
@@ -1220,7 +1314,9 @@ def test_tile_slide_missing_pixel_size_raises_the_actionable_error(mocked_slide,
 def test_tile_slide_unparseable_name_uses_unknown_subject(mocked_slide, tmp_path):
     out = tmp_path / "out"
 
-    tiling.tile_slide(None, _FakeImage(name="mystery.ome.tiff"), _analysis_params(), str(out))
+    tiling.tile_slide(
+        None, _FakeImage(name="mystery.ome.tiff"), _analysis_params(), str(out)
+    )
 
     assert (out / "unknown_subject" / "mystery").is_dir()
 
@@ -1320,8 +1416,11 @@ def test_background_flags_are_rejected_in_whole_mode():
 
 def test_no_background_conflicts_with_naming_one():
     with pytest.raises(SystemExit, match="contradictory"):
-        _validate_args(_tile_args("--roi", "--all", "--no-background",
-                                  "--background-label", "benign"))
+        _validate_args(
+            _tile_args(
+                "--roi", "--all", "--no-background", "--background-label", "benign"
+            )
+        )
 
 
 def test_negative_caps_are_rejected():
@@ -1385,9 +1484,7 @@ def test_build_params_custom_exclusions_replace_the_default():
 def _result(image_id, status, tier=None, **counts):
     from collections import Counter
 
-    return tiling.SlideResult(
-        image_id, status, tier=tier, label_counts=Counter(counts)
-    )
+    return tiling.SlideResult(image_id, status, tier=tier, label_counts=Counter(counts))
 
 
 def _messages(caplog):
@@ -1485,8 +1582,11 @@ def test_tile_help_works_without_numpy_pyvips_or_omero():
     )
     completed = subprocess.run(
         [sys.executable, "-c", program],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        capture_output=True, text=True,
+        cwd=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"
+        ),
+        capture_output=True,
+        text=True,
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -1495,12 +1595,17 @@ def test_tile_help_works_without_numpy_pyvips_or_omero():
 
 
 def test_root_help_works_without_heavy_imports():
-    program = "from lavlab.cli import build_parser; build_parser(); import sys; " \
-              "print(sorted(m for m in ('numpy','pyvips','omero') if m in sys.modules))"
+    program = (
+        "from lavlab.cli import build_parser; build_parser(); import sys; "
+        "print(sorted(m for m in ('numpy','pyvips','omero') if m in sys.modules))"
+    )
     completed = subprocess.run(
         [sys.executable, "-c", program],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        capture_output=True, text=True,
+        cwd=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"
+        ),
+        capture_output=True,
+        text=True,
     )
 
     assert completed.returncode == 0, completed.stderr

@@ -6,8 +6,8 @@ from __future__ import annotations
 import pytest
 
 try:
-    from omero_model_RectangleI import RectangleI
     from omero.rtypes import rint, rstring
+    from omero_model_RectangleI import RectangleI
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"omero-py unavailable: {exc}", allow_module_level=True)
 
@@ -140,11 +140,15 @@ def test_process_image_updates_matches_skips_commented_and_unmatched(monkeypatch
     # numpy/skimage/omero out of parser construction), so patch it at source.
     monkeypatch.setattr(
         "lavlab.roi.get_rois",
-        lambda img: [_FakeRoi([already_commented, matches_palette, no_color, unmatched_color])],
+        lambda img: [
+            _FakeRoi([already_commented, matches_palette, no_color, unmatched_color])
+        ],
     )
 
     mapping = {(25, 20, 255): "Seminal Vesicles"}
-    updated, skipped_has_comment, skipped_no_match = _process_image(conn, 362, mapping, tolerance=10)
+    updated, skipped_has_comment, skipped_no_match = _process_image(
+        conn, 362, mapping, tolerance=10
+    )
 
     assert updated == 1
     assert skipped_has_comment == 1
@@ -162,7 +166,9 @@ def test_process_image_dry_run_reports_without_writing(monkeypatch, caplog):
     matches_palette = _rectangle(1, rgba=(25, 20, 255))
     image = _FakeImage(image_id=362)
     conn = _FakeConn(image=image)
-    monkeypatch.setattr("lavlab.roi.get_rois", lambda img: [_FakeRoi([matches_palette])])
+    monkeypatch.setattr(
+        "lavlab.roi.get_rois", lambda img: [_FakeRoi([matches_palette])]
+    )
 
     mapping = {(25, 20, 255): "Seminal Vesicles"}
     with caplog.at_level("INFO"):
@@ -176,4 +182,6 @@ def test_process_image_dry_run_reports_without_writing(monkeypatch, caplog):
     assert skipped_no_match == 0
     assert conn._update_service.saved == []
     assert matches_palette.getTextValue() is None
-    assert any("would be set to 'Seminal Vesicles'" in r.message for r in caplog.records)
+    assert any(
+        "would be set to 'Seminal Vesicles'" in r.message for r in caplog.records
+    )

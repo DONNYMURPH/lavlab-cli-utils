@@ -16,7 +16,12 @@ from lavlab.geojson.geometry import (
 
 
 def test_rgb_omero_color_round_trip():
-    for r, g, b, a in [(255, 0, 0, 255), (0, 128, 64, 90), (0, 0, 0, 0), (255, 255, 255, 255)]:
+    for r, g, b, a in [
+        (255, 0, 0, 255),
+        (0, 128, 64, 90),
+        (0, 0, 0, 0),
+        (255, 255, 255, 255),
+    ]:
         packed = rgb_to_omero_color(r, g, b, a)
         assert omero_color_to_rgb(packed) == (r, g, b)
 

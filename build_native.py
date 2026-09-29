@@ -126,6 +126,13 @@ def main() -> None:
     output_dir = Path(os.environ.get("LAVLAB_OUTPUT_DIR", project_dir / "native"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # A previous `setup.py bdist_wheel` stages its dist under the package, and
+    # --include-package-data=lavlab would sweep it into this build (Nuitka then
+    # dies resolving the stale copy's dylibs). setup.py clears it the same way.
+    staged_dist = project_dir / "src" / "lavlab" / "bin" / "dist"
+    if staged_dist.exists():
+        shutil.rmtree(staged_dist)
+
     command = [
         sys.executable,
         "-m",
@@ -140,15 +147,22 @@ def main() -> None:
         *IMAGECODECS_NUITKA_FLAGS,
         *SKIMAGE_NUITKA_FLAGS,
         *[f"--include-module={name}" for name in omero_ice_modules()],
-        str(project_dir / "lavlab" / "__main__.py"),
+        str(project_dir / "src" / "lavlab" / "__main__.py"),
     ]
 
     extra_args = os.environ.get("LAVLAB_NUITKA_ARGS", "")
     if extra_args:
         command[3:3] = extra_args.split()
 
+    # src layout: --include-package=lavlab resolves through sys.path, and
+    # the repo root (the cwd) no longer contains the package.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(project_dir / "src"), env.get("PYTHONPATH")])
+    )
+
     print(f"Including {len(omero_ice_modules())} generated OMERO Ice modules.")
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, env=env)
     restore_unpatched_vips(output_dir / "__main__.dist")
 
 

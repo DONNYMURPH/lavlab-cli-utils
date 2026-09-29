@@ -11,13 +11,12 @@ lab's default mapping.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
-import logging
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -41,7 +40,7 @@ class OmeroCreds:
     port: int
 
 
-def _resolve_field(cli_value: Optional[str], env_name: str, field_name: str) -> str:
+def _resolve_field(cli_value: str | None, env_name: str, field_name: str) -> str:
     if cli_value:
         return cli_value
     env_value = os.environ.get(env_name)
@@ -54,10 +53,10 @@ def _resolve_field(cli_value: Optional[str], env_name: str, field_name: str) -> 
 
 
 def resolve_creds(
-    user: Optional[str] = None,
-    password: Optional[str] = None,
-    host: Optional[str] = None,
-    port: Optional[int] = None,
+    user: str | None = None,
+    password: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
 ) -> OmeroCreds:
     """Resolve OMERO connection credentials.
 
@@ -71,7 +70,9 @@ def resolve_creds(
     resolved_port = _resolve_field(
         str(port) if port is not None else None, "OMERO_PORT", "port"
     )
-    return OmeroCreds(resolved_user, resolved_password, resolved_host, int(resolved_port))
+    return OmeroCreds(
+        resolved_user, resolved_password, resolved_host, int(resolved_port)
+    )
 
 
 @dataclass(frozen=True)
@@ -87,10 +88,10 @@ class FsMapEntry:
     substitution can't find them.
     """
 
-    match: "re.Pattern[str]"
+    match: re.Pattern[str]
     base_dir: str
     formatted_dir: str
-    subject_glob: Optional[str] = None
+    subject_glob: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,7 @@ def _default_fs_map_path() -> Path:
     return Path(resources.files("lavlab.data").joinpath("default_fs_map.yaml"))
 
 
-def load_fs_map(path: Optional[str]) -> dict[str, FsMapGroup]:
+def load_fs_map(path: str | None) -> dict[str, FsMapGroup]:
     """Load an fs_map YAML file, falling back to the bundled lab default.
 
     Returns a mapping of group ID (as a string) -> FsMapGroup. Returns an
@@ -120,7 +121,7 @@ def load_fs_map(path: Optional[str]) -> dict[str, FsMapGroup]:
         if not map_path.is_file():
             return {}
 
-    with open(map_path, "r") as f:
+    with open(map_path) as f:
         raw = yaml.safe_load(f) or {}
 
     groups: dict[str, FsMapGroup] = {}

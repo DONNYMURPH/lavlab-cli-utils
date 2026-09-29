@@ -11,7 +11,7 @@ build/
 dist/
 native/
 wheelhouse/
-lavlab/bin/
+src/lavlab/bin/
 docs/
 .venv/
 venv/

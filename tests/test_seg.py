@@ -99,8 +99,11 @@ def test_nifti_to_dcmseg_round_trips_through_dcmseg_to_nifti(tmp_path):
 
     seg_path = tmp_path / "out_seg.dcm"
     nifti_to_dcmseg(
-        str(mask_path), str(dicom_dir), str(seg_path),
-        segment_label="TestSeg", patient_comment="pytest round trip",
+        str(mask_path),
+        str(dicom_dir),
+        str(seg_path),
+        segment_label="TestSeg",
+        patient_comment="pytest round trip",
     )
 
     written = pydicom.dcmread(str(seg_path))
@@ -154,7 +157,9 @@ def test_dcmseg_to_nifti_missing_dicom_seg_raises(tmp_path):
     sitk.WriteImage(_image(), str(ref_nii))
 
     with pytest.raises(FileNotFoundError):
-        dcmseg_to_nifti(str(tmp_path / "missing.dcm"), str(ref_nii), str(tmp_path / "out"))
+        dcmseg_to_nifti(
+            str(tmp_path / "missing.dcm"), str(ref_nii), str(tmp_path / "out")
+        )
 
 
 def test_dcmseg_to_nifti_missing_reference_nifti_raises(tmp_path):
@@ -162,7 +167,9 @@ def test_dcmseg_to_nifti_missing_reference_nifti_raises(tmp_path):
     fake_seg.write_bytes(b"not a real dicom seg")
 
     with pytest.raises(FileNotFoundError):
-        dcmseg_to_nifti(str(fake_seg), str(tmp_path / "missing.nii.gz"), str(tmp_path / "out"))
+        dcmseg_to_nifti(
+            str(fake_seg), str(tmp_path / "missing.nii.gz"), str(tmp_path / "out")
+        )
 
 
 def test_nifti_to_dcmseg_missing_mask_raises(tmp_path):

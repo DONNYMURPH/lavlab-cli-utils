@@ -62,7 +62,9 @@ class _FakeSession(_FakeService):
         return _FakeAsyncResult()
 
     def end_getWidgetService(self, async_result):
-        raise AssertionError("end_getWidgetService should never be called by AsyncService")
+        raise AssertionError(
+            "end_getWidgetService should never be called by AsyncService"
+        )
 
     def getWidgetService(self):
         return _FakeService()

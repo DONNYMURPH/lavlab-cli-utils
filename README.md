@@ -6,7 +6,7 @@ annotations in and out of OMERO, filling in ROI metadata, and converting
 between DICOM SEG and NIfTI segmentation masks.
 
 More documentation lives in [`docs/`](docs/index.md):
-[`docs/API.md`](docs/API.md) is the exhaustive flag-by-flag CLI reference
+[`docs/reference.md`](docs/reference.md) is the exhaustive flag-by-flag CLI reference
 plus the importable Python API; [`CONTRIBUTING.md`](CONTRIBUTING.md) covers
 development conventions.
 
@@ -37,7 +37,7 @@ you're using:
   compiled ahead of time with [Nuitka](https://nuitka.net). No Python environment,
   no `omero-py`, no Ice bindings needed on the machine running it.
 - **Source checkout** (development): `python -m lavlab ...` runs the real
-  Python CLI directly (`lavlab/__main__.py` -> `lavlab/cli.py`). This is
+  Python CLI directly (`src/lavlab/__main__.py` -> `src/lavlab/cli.py`). This is
   what you use while developing, and it needs the full dependency stack
   installed (see below) since nothing is precompiled.
 - **BIN** (this uses no python at all as otherwise you use pip): There is also a bin
@@ -102,7 +102,7 @@ accept `-g/--group` to scope a run to one group explicitly.
 ## Commands
 
 The sections below give the shape of each command with the most common
-flags; **[`docs/API.md`](docs/API.md) has every flag for every command**,
+flags; **[`docs/reference.md`](docs/reference.md) has every flag for every command**,
 exhaustively.
 
 ### `lavlab lr` -- pull large-recon (downsampled) images
@@ -176,7 +176,7 @@ lavlab lr batch -g 3 --workers 8 --skip-existing --skip-local
 
 If you don't pass `-o`, output location falls back to `fs_map` -- a YAML
 file mapping OMERO group -> filesystem destination by regex match on the
-image name (`lavlab/data/default_fs_map.yaml` ships a lab default; `--fs-map
+image name (`src/lavlab/data/default_fs_map.yaml` ships a lab default; `--fs-map
 custom.yaml` overrides it). No match, or the mapped directory doesn't
 exist on disk: single-image mode writes to the current directory instead;
 batch mode skips that image and continues, warning rather than failing the
@@ -343,7 +343,7 @@ can differ by a quantization step. Don't mix tiers within one training set
 if that matters to you.
 
 **Class folders** come from a `{folder: [textValue aliases]}` YAML
-(`lavlab/data/default_tile_labels.yaml`, overridable with `--labels`),
+(`src/lavlab/data/default_tile_labels.yaml`, overridable with `--labels`),
 matched case-insensitively and trimmed. The default maps the palette's
 `G4CG`/`G4FG` spellings onto the `G4cg`/`G4fg` folders the classifier
 expects, and lists the non-Gleason palette labels (`Atrophy`, `HGPIN`,
@@ -403,7 +403,7 @@ lose data if you're not careful:
   shape is just one flat point list. A hole gets "bridged" in as a
   zero-width slit cut from the outer ring to the nearest hole vertex,
   which renders correctly as a hole under the standard nonzero fill rule
-  (`lavlab/geojson/geometry.py`'s `bridge_hole`). `export` reverses this
+  (`src/lavlab/geojson/geometry.py`'s `bridge_hole`). `export` reverses this
   automatically (`unbridge_ring`); `--keep-bridges` turns that off if you
   specifically want the raw bridged shape back. Detecting a genuine bridge
   vs. an ordinary duplicate point (e.g. a dense freehand trace revisiting
@@ -483,11 +483,11 @@ the modern multi-class variant of the DICOM SEG standard (one integer
 label per voxel, `0` = background), as opposed to the older `BINARY`
 variant (one frame stack per segment). What segments exist and how
 they're described (label + SNOMED code) comes from a JSON template --
-`lavlab/data/default_seg_template.json` unless you pass `--template
+`src/lavlab/data/default_seg_template.json` unless you pass `--template
 your.json`. **This is not the dcmqi metainfo format** if you've used
 `dcmqi`/`pydicom-seg` templates before -- it's a simpler schema built
 around `highdicom.seg.SegmentDescription`; see
-[`docs/API.md`](docs/API.md#--template-schema-lavlab-seg-nii2dcm) for the
+[`docs/reference.md`](docs/reference.md#--template-schema-lavlab-seg-nii2dcm) for the
 exact shape.
 
 ## Development
@@ -520,7 +520,7 @@ its own directory on the path and uses the environment you already set up.
 
 This shells out to Nuitka (`setup.py`'s `build_py` override, or run
 `build_native.py` standalone if you just want the compiled binary without
-a full wheel) to compile `lavlab/__main__.py` into a standalone
+a full wheel) to compile `src/lavlab/__main__.py` into a standalone
 executable, bundled into the wheel as `lavlab/bin/dist/`; the
 `lavlab` console-script just execs `lavlab/bin/dist/lavlab-bin`. The
 build is `--standalone` rather than `--onefile`: the artifact is a
@@ -619,7 +619,7 @@ ever leave your machine.
   doesn't affect `lavlab seg dcm2nii`'s own output, which works around it
   automatically (`dcmseg_to_nifti` falls back to the reference NIfTI's
   geometry when `sitk.ReadImage` can't read a `LABELMAP` SEG's directly --
-  see the `try`/`except RuntimeError` in `lavlab/seg.py`) -- it only
+  see the `try`/`except RuntimeError` in `src/lavlab/seg.py`) -- it only
   matters if you're trying to open the file with some *other* tool that
   goes through SimpleITK.
 - **`pip install -e ".[dev]"` fails on `omero-py`.** You need the Ice

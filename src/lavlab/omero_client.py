@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Optional
 
 import omero.sys
 from omero.gateway import BlitzGateway
@@ -25,14 +24,19 @@ log = logging.getLogger(__name__)
 ALL_GROUPS = -1
 
 
-def connect(creds: OmeroCreds, retries: int = 5, base_delay: float = 1.0) -> BlitzGateway:
+def connect(
+    creds: OmeroCreds, retries: int = 5, base_delay: float = 1.0
+) -> BlitzGateway:
     """Connect to OMERO, retrying transient failures with exponential backoff."""
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
     for attempt in range(1, retries + 1):
         try:
             conn = BlitzGateway(
-                creds.user, creds.password,
-                host=creds.host, port=creds.port, secure=True,
+                creds.user,
+                creds.password,
+                host=creds.host,
+                port=creds.port,
+                secure=True,
             )
             if conn.connect():
                 conn.SERVICE_OPTS.setOmeroGroup(ALL_GROUPS)
@@ -44,12 +48,19 @@ def connect(creds: OmeroCreds, retries: int = 5, base_delay: float = 1.0) -> Bli
                 pass
         except Exception as exc:
             last_exc = exc
-            log.info("Failed to create OMERO session. Attempt %d/%d: %s", attempt, retries, exc)
+            log.info(
+                "Failed to create OMERO session. Attempt %d/%d: %s",
+                attempt,
+                retries,
+                exc,
+            )
 
         if attempt < retries:
             time.sleep(base_delay * (2 ** (attempt - 1)) + random.random())
 
-    raise RuntimeError(f"Failed to connect to OMERO after {retries} attempts") from last_exc
+    raise RuntimeError(
+        f"Failed to connect to OMERO after {retries} attempts"
+    ) from last_exc
 
 
 def switch_to_object_group(conn: BlitzGateway, obj) -> None:
@@ -71,7 +82,7 @@ def is_conn_error(exc: BaseException) -> bool:
     )
 
 
-def get_source_file_path(conn: BlitzGateway, image_id: int) -> Optional[str]:
+def get_source_file_path(conn: BlitzGateway, image_id: int) -> str | None:
     """Return the absolute server-side path of the primary file for an image.
 
     Uses the fileset -> usedFiles -> originalFile relationship so the path is
@@ -98,7 +109,7 @@ def get_source_file_path(conn: BlitzGateway, image_id: int) -> Optional[str]:
     return "/OMERO/ManagedRepository/" + f.path.val + f.name.val
 
 
-def iter_image_ids(conn: BlitzGateway, group_id: Optional[int] = None):
+def iter_image_ids(conn: BlitzGateway, group_id: int | None = None):
     """Yield image IDs to batch-process.
 
     If group_id is given, only that group's images are listed (and the

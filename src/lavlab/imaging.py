@@ -41,7 +41,12 @@ def load_downsampled(src_path: str, downsample: int) -> pv.Image:
 
         log.debug(
             "Source %s: full=%dx%d target=%dx%d using level %d",
-            src_path, full_w, full_h, target_w, target_h, best_idx,
+            src_path,
+            full_w,
+            full_h,
+            target_w,
+            target_h,
+            best_idx,
         )
 
         arr = series.levels[best_idx].asarray()
@@ -66,7 +71,9 @@ def load_downsampled(src_path: str, downsample: int) -> pv.Image:
 
 
 def _load_via_fallback(src_path: str, downsample: int) -> pv.Image:
-    log.warning("No TIFF series found in '%s'; falling back to pyvips for load.", src_path)
+    log.warning(
+        "No TIFF series found in '%s'; falling back to pyvips for load.", src_path
+    )
     try:
         img = pv.Image.tiffload(src_path, access="sequential")
         target_w = max(1, round(img.width / downsample))
@@ -99,12 +106,16 @@ def is_rgb(image_path: str) -> bool:
     except Exception:
         return False
 
+
 def write_recon(img, output_path: str, lossless: bool = True) -> None:
     ext = output_path.lower()
     if ext.endswith(".jp2"):
         from PIL import Image as PILImage
+
         mem = img.write_to_memory()
-        arr = np.ndarray(buffer=mem, dtype=np.uint8, shape=(img.height, img.width, img.bands))
+        arr = np.ndarray(
+            buffer=mem, dtype=np.uint8, shape=(img.height, img.width, img.bands)
+        )
         if img.bands == 1:
             arr = arr[:, :, 0]
         PILImage.fromarray(arr).save(

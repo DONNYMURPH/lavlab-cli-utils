@@ -37,7 +37,12 @@ def _tier_line(caplog):
 
 def test_tier_breakdown_logged_at_info(caplog):
     ids = [1, 2, 3, 4]
-    results = [_ok(1, "local"), _ok(2, "local"), _ok(3, "network"), _ok(4, "annotation")]
+    results = [
+        _ok(1, "local"),
+        _ok(2, "local"),
+        _ok(3, "network"),
+        _ok(4, "annotation"),
+    ]
 
     with caplog.at_level("INFO"):
         _summarise_batch(ids, results, None)
@@ -130,8 +135,13 @@ def test_fully_successful_batch_exits_zero():
 
 def _args(**kw):
     base = dict(
-        target="batch", skip_existing=False, regenerate=False,
-        skip_local=False, skip_upload=False, output=None, max_failed=None,
+        target="batch",
+        skip_existing=False,
+        regenerate=False,
+        skip_local=False,
+        skip_upload=False,
+        output=None,
+        max_failed=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)

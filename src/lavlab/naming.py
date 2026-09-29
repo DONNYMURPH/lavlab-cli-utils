@@ -13,7 +13,6 @@ from __future__ import annotations
 import glob
 import logging
 import os
-from typing import Optional
 
 from lavlab.config import ConfigError, FsMapGroup
 
@@ -26,7 +25,7 @@ def get_stem(filename: str) -> str:
 
 
 def build_filename(
-    downsample: int, filename: str, suffix: Optional[str] = None, ext: str = "jp2"
+    downsample: int, filename: str, suffix: str | None = None, ext: str = "jp2"
 ) -> str:
     stem = get_stem(filename)
     name = f"LR{downsample}_{stem}"
@@ -37,7 +36,7 @@ def build_filename(
 
 def resolve_fs_map_dir(
     fs_map: dict[str, FsMapGroup], group_id, filename: str
-) -> Optional[str]:
+) -> str | None:
     """Return the directory an image should be written to per fs_map.
 
     Returns None if there's no fs_map entry for this group/filename. Raises
@@ -67,7 +66,9 @@ def resolve_fs_map_dir(
                 log.warning(
                     "fs_map: no directory under '%s' matching '*%s' for '%s'; "
                     "trying the next entry.",
-                    entry.base_dir, value, filename,
+                    entry.base_dir,
+                    value,
+                    filename,
                 )
                 continue
             base_dir = candidates[0]
@@ -81,15 +82,15 @@ def resolve_fs_map_dir(
 
 
 def resolve_output_path(
-    output_arg: Optional[str],
-    fs_map: Optional[dict[str, FsMapGroup]],
+    output_arg: str | None,
+    fs_map: dict[str, FsMapGroup] | None,
     group_id,
     filename: str,
     downsample: int,
-    suffix: Optional[str] = None,
+    suffix: str | None = None,
     ext: str = "jp2",
     batch: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """Resolve the final output file path for one image.
 
     - If ``output_arg`` is given, use it directly (joined with the generated

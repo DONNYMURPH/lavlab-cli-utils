@@ -37,18 +37,25 @@ def add_parser(subparsers) -> None:
         help="A built-in palette name (e.g. 'default') or a path to a YAML/JSON palette file.",
     )
     textvalue_parser.add_argument(
-        "image_ids", nargs="*", type=int,
+        "image_ids",
+        nargs="*",
+        type=int,
         help="OMERO image IDs to process. Omit and use --group to process a whole group.",
     )
-    textvalue_parser.add_argument("-g", "--group", type=int, help="Process every image in this OMERO group.")
     textvalue_parser.add_argument(
-        "--tolerance", type=int, default=DEFAULT_TOLERANCE,
+        "-g", "--group", type=int, help="Process every image in this OMERO group."
+    )
+    textvalue_parser.add_argument(
+        "--tolerance",
+        type=int,
+        default=DEFAULT_TOLERANCE,
         help=f"Per-channel color match tolerance (default: {DEFAULT_TOLERANCE}).",
     )
     textvalue_parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Report what would be updated (including each matched shape's ID and "
-             "label) without writing anything to OMERO.",
+        "label) without writing anything to OMERO.",
     )
     add_creds_args(textvalue_parser)
     textvalue_parser.set_defaults(handler=run)
@@ -105,14 +112,20 @@ def _process_image(
             if dry_run:
                 log.info(
                     "Image %d: shape %s would be set to %r (color %s).",
-                    image_id, shape_id, label, rgb,
+                    image_id,
+                    shape_id,
+                    label,
+                    rgb,
                 )
             else:
                 shape.setTextValue(rstring(label))
                 conn.getUpdateService().saveObject(shape)
                 log.info(
                     "Image %d: shape %s set to %r (color %s).",
-                    image_id, shape_id, label, rgb,
+                    image_id,
+                    shape_id,
+                    label,
+                    rgb,
                 )
             updated += 1
 
@@ -125,7 +138,7 @@ def run(args: argparse.Namespace) -> None:
     try:
         mapping = load_color_mapping(args.text_mapping)
     except (FileNotFoundError, ValueError) as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from None
 
     if args.image_ids:
         image_ids = args.image_ids
@@ -148,7 +161,9 @@ def run(args: argparse.Namespace) -> None:
             total_updated += updated
             total_skip_comment += skip_comment
             total_skip_no_match += skip_no_match
-            print(f"Image {image_id}: {verb}={updated} had_comment={skip_comment} no_match={skip_no_match}")
+            print(
+                f"Image {image_id}: {verb}={updated} had_comment={skip_comment} no_match={skip_no_match}"
+            )
 
         summary_verb = "would be updated" if args.dry_run else "updated"
         print(
@@ -156,6 +171,8 @@ def run(args: argparse.Namespace) -> None:
             f"{total_skip_comment} already commented, {total_skip_no_match} unmatched."
         )
         if args.dry_run:
-            print("(dry run -- no changes were written to OMERO; re-run without --dry-run to apply)")
+            print(
+                "(dry run -- no changes were written to OMERO; re-run without --dry-run to apply)"
+            )
     finally:
         conn.close()

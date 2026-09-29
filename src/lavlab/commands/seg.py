@@ -33,10 +33,14 @@ def add_parser(subparsers) -> None:
     )
     dcm2nii.add_argument("dicom_seg", help="path to the DICOM SEG file")
     dcm2nii.add_argument(
-        "reference_nifti", help="path to the reference NIfTI image the segmentation applies to"
+        "reference_nifti",
+        help="path to the reference NIfTI image the segmentation applies to",
     )
     dcm2nii.add_argument(
-        "-o", "--out", required=True, dest="output_dir",
+        "-o",
+        "--out",
+        required=True,
+        dest="output_dir",
         help="directory to write the per-segment NIfTI files into",
     )
     dcm2nii.set_defaults(handler=run_dcm2nii)
@@ -49,17 +53,23 @@ def add_parser(subparsers) -> None:
         "reference_dicom_dir", help="directory of .dcm files the mask was drawn against"
     )
     nii2dcm.add_argument(
-        "-o", "--out", required=True, dest="output_path",
+        "-o",
+        "--out",
+        required=True,
+        dest="output_path",
         help="path to write the DICOM SEG object to",
     )
     nii2dcm.add_argument(
-        "--template", help="segment-attributes JSON template for highdicom (default: bundled template)"
+        "--template",
+        help="segment-attributes JSON template for highdicom (default: bundled template)",
     )
     nii2dcm.add_argument(
         "--label", dest="segment_label", help="overrides the template's segment 1 label"
     )
     nii2dcm.add_argument(
-        "--comment", dest="patient_comment", help="overrides PatientComments on the written object"
+        "--comment",
+        dest="patient_comment",
+        help="overrides PatientComments on the written object",
     )
     nii2dcm.set_defaults(handler=run_nii2dcm)
 
@@ -68,9 +78,11 @@ def run_dcm2nii(args: argparse.Namespace) -> None:
     from lavlab.seg import dcmseg_to_nifti
 
     try:
-        out_paths = dcmseg_to_nifti(args.dicom_seg, args.reference_nifti, args.output_dir)
+        out_paths = dcmseg_to_nifti(
+            args.dicom_seg, args.reference_nifti, args.output_dir
+        )
     except (FileNotFoundError, ValueError) as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from None
 
     print(f"wrote {len(out_paths)} segment(s):")
     for path in out_paths:
@@ -90,6 +102,6 @@ def run_nii2dcm(args: argparse.Namespace) -> None:
             patient_comment=args.patient_comment,
         )
     except (FileNotFoundError, ValueError) as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from None
 
     print(f"wrote {out_path}")

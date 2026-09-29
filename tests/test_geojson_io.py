@@ -35,7 +35,9 @@ def _polygon_feature(coordinates, feature_id="abc", classification=None):
 
 
 def test_feature_to_annotation_simple_polygon():
-    feature = _polygon_feature([SQUARE], classification={"name": "tumor", "color": [255, 0, 0]})
+    feature = _polygon_feature(
+        [SQUARE], classification={"name": "tumor", "color": [255, 0, 0]}
+    )
     warnings = []
     annotation = feature_to_annotation(feature, warnings)
 
@@ -57,7 +59,8 @@ def test_feature_to_annotation_bridges_hole_and_warns():
 
 def test_feature_to_annotation_unsupported_geometry_warns_and_skips():
     feature = {
-        "type": "Feature", "id": "x",
+        "type": "Feature",
+        "id": "x",
         "geometry": {"type": "Bogus", "coordinates": [[0, 0], [1, 1]]},
         "properties": {},
     }
@@ -70,7 +73,8 @@ def test_feature_to_annotation_unsupported_geometry_warns_and_skips():
 
 def test_feature_to_annotation_point():
     feature = {
-        "type": "Feature", "id": "p1",
+        "type": "Feature",
+        "id": "p1",
         "geometry": {"type": "Point", "coordinates": [5, 7]},
         "properties": {},
     }
@@ -84,7 +88,8 @@ def test_feature_to_annotation_point():
 
 def test_feature_to_annotation_multipoint():
     feature = {
-        "type": "Feature", "id": "mp1",
+        "type": "Feature",
+        "id": "mp1",
         "geometry": {"type": "MultiPoint", "coordinates": [[1, 1], [2, 2], [3, 3]]},
         "properties": {},
     }
@@ -97,7 +102,8 @@ def test_feature_to_annotation_multipoint():
 
 def test_feature_to_annotation_linestring():
     feature = {
-        "type": "Feature", "id": "l1",
+        "type": "Feature",
+        "id": "l1",
         "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1], [2, 0]]},
         "properties": {},
     }
@@ -111,7 +117,8 @@ def test_feature_to_annotation_linestring():
 
 def test_feature_to_annotation_multilinestring():
     feature = {
-        "type": "Feature", "id": "ml1",
+        "type": "Feature",
+        "id": "ml1",
         "geometry": {
             "type": "MultiLineString",
             "coordinates": [[[0, 0], [1, 1]], [[5, 5], [6, 6], [7, 5]]],
@@ -127,7 +134,8 @@ def test_feature_to_annotation_multilinestring():
 
 def test_feature_to_annotation_geometry_collection_mixed_kinds():
     feature = {
-        "type": "Feature", "id": "gc1",
+        "type": "Feature",
+        "id": "gc1",
         "geometry": {
             "type": "GeometryCollection",
             "geometries": [
@@ -145,7 +153,9 @@ def test_feature_to_annotation_geometry_collection_mixed_kinds():
 
 
 def test_round_trip_feature_annotation_feature():
-    original = _polygon_feature([SQUARE, HOLE], classification={"name": "tumor", "color": [1, 2, 3]})
+    original = _polygon_feature(
+        [SQUARE, HOLE], classification={"name": "tumor", "color": [1, 2, 3]}
+    )
     warnings = []
     annotation = feature_to_annotation(original, warnings)
 
@@ -216,7 +226,8 @@ def test_summarise_features_handles_geometry_collection_without_crashing():
     features = [
         _polygon_feature([SQUARE]),
         {
-            "type": "Feature", "id": "gc1",
+            "type": "Feature",
+            "id": "gc1",
             "geometry": {
                 "type": "GeometryCollection",
                 "geometries": [
@@ -245,7 +256,9 @@ def test_load_features_malformed_json_raises_conversion_error(tmp_path):
 
 def test_load_features_wrong_top_level_type_raises(tmp_path):
     path = tmp_path / "wrong.geojson"
-    path.write_text(json.dumps({"type": "Point", "coordinates": [0, 0]}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"type": "Point", "coordinates": [0, 0]}), encoding="utf-8"
+    )
 
     with pytest.raises(ConversionError):
         load_features(path)
@@ -254,9 +267,10 @@ def test_load_features_wrong_top_level_type_raises(tmp_path):
 def test_load_features_accepts_feature_collection(tmp_path):
     path = tmp_path / "fc.geojson"
     path.write_text(
-        json.dumps({"type": "FeatureCollection", "features": [_polygon_feature([SQUARE])]}),
+        json.dumps(
+            {"type": "FeatureCollection", "features": [_polygon_feature([SQUARE])]}
+        ),
         encoding="utf-8",
     )
     features = load_features(path)
     assert len(features) == 1
-    

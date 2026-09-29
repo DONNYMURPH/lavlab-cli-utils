@@ -28,6 +28,7 @@ except Exception as exc:  # pragma: no cover
 imagecodecs = pytest.importorskip("imagecodecs")
 
 from build_native import IMAGECODECS_NUITKA_FLAGS  # noqa: E402
+
 from lavlab.imaging import load_downsampled  # noqa: E402
 
 _FLAGGED_MODULES = [

@@ -1,22 +1,19 @@
 # SPDX-FileCopyrightText: 2026-present LavLab <domurphy@mcw.edu>
 #
 # SPDX-License-Identifier: MIT
-"""Asyncio adapter for OMERO's synchronous Ice service proxies.
-
-"""
+"""Asyncio adapter for OMERO's synchronous Ice service proxies."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from functools import partial, update_wrapper
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
 
 def _firstline_truncate(s) -> str:
-    lines = "{}\n".format(s).splitlines()
+    lines = f"{s}\n".splitlines()
     if len(lines[0]) > 80 or len(lines) > 1:
         s = lines[0][:79] + "…"
     return s
@@ -47,7 +44,9 @@ async def ice_async(loop: asyncio.AbstractEventLoop, func, *args, **kwargs):
     if log.isEnabledFor(logging.DEBUG):
         log.debug(
             "_exec_ice_async(%s) sent:%s completed:%s",
-            func.__name__, a.isSent(), a.isCompleted(),
+            func.__name__,
+            a.isSent(),
+            a.isCompleted(),
         )
 
     result = await future
@@ -57,7 +56,9 @@ async def ice_async(loop: asyncio.AbstractEventLoop, func, *args, **kwargs):
 class AsyncService:
     """Convert an OMERO Ice service to an async service."""
 
-    def __init__(self, svc: object, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+    def __init__(
+        self, svc: object, loop: asyncio.AbstractEventLoop | None = None
+    ) -> None:
         """
         :param svc: The OMERO Ice service.
         :param loop: The async event loop (optional; defaults to the
@@ -91,7 +92,7 @@ class AsyncService:
             )
 
 
-async def _getServiceWrapper(getsvc_m, loop):
+async def _getServiceWrapper(getsvc_m, loop):  # noqa: N802
     svc = await getsvc_m()
     return AsyncService(svc, loop)
 
@@ -100,7 +101,7 @@ class AsyncSession(AsyncService):
     """Wrap a session (e.g. a BlitzGateway connection's ``c.sf``) so all
     services it hands out are async."""
 
-    def __init__(self, session, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+    def __init__(self, session, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """
         :param session: The OMERO session (e.g. ``conn.c.sf``).
         :param loop: The async event loop (optional).
@@ -109,8 +110,10 @@ class AsyncSession(AsyncService):
         getsvc_methods = {
             m
             for m in dir(self)
-            if callable(getattr(self, m))
-            and (m.startswith("get") and m.endswith("Service"))
+            if (
+                callable(getattr(self, m))
+                and (m.startswith("get") and m.endswith("Service"))
+            )
             or (m.startswith("create") and m.endswith("Store"))
         }
 

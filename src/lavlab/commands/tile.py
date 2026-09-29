@@ -33,102 +33,208 @@ def add_parser(subparsers) -> None:
     parser = subparsers.add_parser(
         "tile", help="Cut whole-slide images into fixed-size tiles for training."
     )
-    parser.add_argument("target", help="An OMERO image ID, or 'batch' to tile a whole group.")
-    parser.add_argument("-o", "--out", required=True, metavar="DIR",
-                        help="Output root directory (required).")
+    parser.add_argument(
+        "target", help="An OMERO image ID, or 'batch' to tile a whole group."
+    )
+    parser.add_argument(
+        "-o",
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Output root directory (required).",
+    )
 
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--whole", action="store_true",
-                      help="Tile the whole slide (tissue only), under a flat 'whole/' label. "
-                           "For inference or unannotated slides -- its output is never "
-                           "treated as a benign class.")
-    mode.add_argument("--roi", action="store_true",
-                      help="Tile only inside ROIs, labelling each tile by the annotation "
-                           "it falls in.")
+    mode.add_argument(
+        "--whole",
+        action="store_true",
+        help="Tile the whole slide (tissue only), under a flat 'whole/' label. "
+        "For inference or unannotated slides -- its output is never "
+        "treated as a benign class.",
+    )
+    mode.add_argument(
+        "--roi",
+        action="store_true",
+        help="Tile only inside ROIs, labelling each tile by the annotation "
+        "it falls in.",
+    )
 
-    parser.add_argument("-a", "--all", action="store_true",
-                        help="--roi: include every annotation regardless of textValue.")
-    parser.add_argument("-t", "--text-filter", type=str.lower, action="append", default=[],
-                        help="--roi: whitelist a textValue or class folder name "
-                             "(repeatable, case-insensitive). Mutually exclusive with --all.")
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="--roi: include every annotation regardless of textValue.",
+    )
+    parser.add_argument(
+        "-t",
+        "--text-filter",
+        type=str.lower,
+        action="append",
+        default=[],
+        help="--roi: whitelist a textValue or class folder name "
+        "(repeatable, case-insensitive). Mutually exclusive with --all.",
+    )
 
     scale = parser.add_mutually_exclusive_group()
-    scale.add_argument("--mpp", type=float, default=None,
-                       help=f"Target micrometres per pixel (default: {DEFAULT_MPP}). Read "
-                            "against the image's own pixel size to pick a pyramid level "
-                            "and resize factor. Errors out if the image has no pixel "
-                            "size recorded -- use --downsample instead.")
-    scale.add_argument("--downsample", type=float, default=None, metavar="N",
-                       help="Use an explicit level-0-pixels-per-output-pixel factor "
-                            "instead of --mpp. The only option for an image with no "
-                            "physical pixel size.")
+    scale.add_argument(
+        "--mpp",
+        type=float,
+        default=None,
+        help=f"Target micrometres per pixel (default: {DEFAULT_MPP}). Read "
+        "against the image's own pixel size to pick a pyramid level "
+        "and resize factor. Errors out if the image has no pixel "
+        "size recorded -- use --downsample instead.",
+    )
+    scale.add_argument(
+        "--downsample",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Use an explicit level-0-pixels-per-output-pixel factor "
+        "instead of --mpp. The only option for an image with no "
+        "physical pixel size.",
+    )
 
-    parser.add_argument("--size", type=int, default=DEFAULT_SIZE,
-                        help=f"Tile edge in output pixels (default: {DEFAULT_SIZE}).")
-    parser.add_argument("--overlap", type=int, default=0,
-                        help="Overlap between neighbouring tiles in output pixels; stride "
-                             "is size - overlap (default: 0).")
-    parser.add_argument("--min-coverage", type=float, default=DEFAULT_MIN_COVERAGE,
-                        help="--roi: fraction of a tile that must lie inside one class's "
-                             f"ROI area for it to take that class (default: {DEFAULT_MIN_COVERAGE}). "
-                             "The highest-covering qualifying class wins.")
-    parser.add_argument("--tissue-thresh", type=float, default=DEFAULT_TISSUE_THRESH,
-                        help="Minimum tissue fraction to keep a tile, in both modes "
-                             f"(default: {DEFAULT_TISSUE_THRESH}).")
-    parser.add_argument("--format", choices=["png", "jpg"], default=None,
-                        help="Tile image format (default: png). Rejected with "
-                             "--coords-only, which writes no images at all.")
-    parser.add_argument("--coords-only", action="store_true",
-                        help="Write only the manifest and parameters, no image files. A "
-                             "40x whole-mount grids to 80-100k tiles, so this is how you "
-                             "survey a slide without materialising them.")
-    parser.add_argument("--labels", metavar="PATH",
-                        help="Custom textValue -> class folder YAML (default: the bundled "
-                             "lavlab/data/default_tile_labels.yaml).")
+    parser.add_argument(
+        "--size",
+        type=int,
+        default=DEFAULT_SIZE,
+        help=f"Tile edge in output pixels (default: {DEFAULT_SIZE}).",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=int,
+        default=0,
+        help="Overlap between neighbouring tiles in output pixels; stride "
+        "is size - overlap (default: 0).",
+    )
+    parser.add_argument(
+        "--min-coverage",
+        type=float,
+        default=DEFAULT_MIN_COVERAGE,
+        help="--roi: fraction of a tile that must lie inside one class's "
+        f"ROI area for it to take that class (default: {DEFAULT_MIN_COVERAGE}). "
+        "The highest-covering qualifying class wins.",
+    )
+    parser.add_argument(
+        "--tissue-thresh",
+        type=float,
+        default=DEFAULT_TISSUE_THRESH,
+        help="Minimum tissue fraction to keep a tile, in both modes "
+        f"(default: {DEFAULT_TISSUE_THRESH}).",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["png", "jpg"],
+        default=None,
+        help="Tile image format (default: png). Rejected with "
+        "--coords-only, which writes no images at all.",
+    )
+    parser.add_argument(
+        "--coords-only",
+        action="store_true",
+        help="Write only the manifest and parameters, no image files. A "
+        "40x whole-mount grids to 80-100k tiles, so this is how you "
+        "survey a slide without materialising them.",
+    )
+    parser.add_argument(
+        "--labels",
+        metavar="PATH",
+        help="Custom textValue -> class folder YAML (default: the bundled "
+        "lavlab/data/default_tile_labels.yaml).",
+    )
 
-    parser.add_argument("--exclude-text", type=str.lower, action="append", default=None,
-                        help="textValue marking an exclusion region; any tile overlapping "
-                             "one at all is dropped, in both modes (repeatable, default: "
-                             f"{', '.join(DEFAULT_EXCLUDE_TEXT)}).")
+    parser.add_argument(
+        "--exclude-text",
+        type=str.lower,
+        action="append",
+        default=None,
+        help="textValue marking an exclusion region; any tile overlapping "
+        "one at all is dropped, in both modes (repeatable, default: "
+        f"{', '.join(DEFAULT_EXCLUDE_TEXT)}).",
+    )
 
-    parser.add_argument("--background-label", default=None, metavar="NAME",
-                        help="--roi: folder for tissue tiles inside no ROI on an annotated "
-                             f"slide (default: {DEFAULT_BACKGROUND_LABEL}). Annotators mark "
-                             "everything, so such tissue is genuinely benign -- but only on "
-                             "a slide that has ROIs, so slides with none are skipped instead.")
-    parser.add_argument("--no-background", action="store_true",
-                        help="--roi: don't emit background tiles at all.")
-    parser.add_argument("--background-margin", type=int, default=None, metavar="UM",
-                        help="--roi: keep background tiles this many micrometres clear of "
-                             f"every ROI (default: {DEFAULT_BACKGROUND_MARGIN}), so tiles "
-                             "straddling an annotation edge aren't called benign.")
-    parser.add_argument("--max-background-tiles", type=int, default=None, metavar="N",
-                        help="--roi: cap background tiles per slide, sampled at random "
-                             f"(default: {DEFAULT_MAX_BACKGROUND_TILES}). Background "
-                             "otherwise vastly outnumbers every graded class.")
+    parser.add_argument(
+        "--background-label",
+        default=None,
+        metavar="NAME",
+        help="--roi: folder for tissue tiles inside no ROI on an annotated "
+        f"slide (default: {DEFAULT_BACKGROUND_LABEL}). Annotators mark "
+        "everything, so such tissue is genuinely benign -- but only on "
+        "a slide that has ROIs, so slides with none are skipped instead.",
+    )
+    parser.add_argument(
+        "--no-background",
+        action="store_true",
+        help="--roi: don't emit background tiles at all.",
+    )
+    parser.add_argument(
+        "--background-margin",
+        type=int,
+        default=None,
+        metavar="UM",
+        help="--roi: keep background tiles this many micrometres clear of "
+        f"every ROI (default: {DEFAULT_BACKGROUND_MARGIN}), so tiles "
+        "straddling an annotation edge aren't called benign.",
+    )
+    parser.add_argument(
+        "--max-background-tiles",
+        type=int,
+        default=None,
+        metavar="N",
+        help="--roi: cap background tiles per slide, sampled at random "
+        f"(default: {DEFAULT_MAX_BACKGROUND_TILES}). Background "
+        "otherwise vastly outnumbers every graded class.",
+    )
 
-    parser.add_argument("--max-tiles", type=int, default=None, metavar="N",
-                        help="Cap tiles per slide, sampled at random. Handy for a quick test run.")
-    parser.add_argument("--max-tiles-per-label", type=int, default=None, metavar="N",
-                        help="Cap tiles per class per slide, sampled at random.")
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Seed for every random sample, so a slide tiled twice with the "
-                             "same settings yields the same tiles (default: 0).")
+    parser.add_argument(
+        "--max-tiles",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap tiles per slide, sampled at random. Handy for a quick test run.",
+    )
+    parser.add_argument(
+        "--max-tiles-per-label",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap tiles per class per slide, sampled at random.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed for every random sample, so a slide tiled twice with the "
+        "same settings yields the same tiles (default: 0).",
+    )
 
-    parser.add_argument("--force-local", action="store_true",
-                        help="Read a JPEG-2000 source locally anyway. By default a bare .jp2 "
-                             "falls forward to the network tier, because the bundled libvips "
-                             "has no jp2k loader and every tile would decode the whole "
-                             "codestream through Pillow.")
-    parser.add_argument("--skip-existing", action="store_true",
-                        help="Skip slides whose manifest.csv and tile_params.json show a "
-                             "finished run with these same parameters. A slide tiled with "
-                             "*different* parameters is warned about and skipped too, unless "
-                             "the global --override is given (which re-tiles it).")
+    parser.add_argument(
+        "--force-local",
+        action="store_true",
+        help="Read a JPEG-2000 source locally anyway. By default a bare .jp2 "
+        "falls forward to the network tier, because the bundled libvips "
+        "has no jp2k loader and every tile would decode the whole "
+        "codestream through Pillow.",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip slides whose manifest.csv and tile_params.json show a "
+        "finished run with these same parameters. A slide tiled with "
+        "*different* parameters is warned about and skipped too, unless "
+        "the global --override is given (which re-tiles it).",
+    )
 
-    parser.add_argument("-g", "--group", type=int, help="OMERO group ID (batch mode only).")
-    parser.add_argument("--workers", type=int, default=8,
-                        help="Parallel workers for batch mode (default: 8).")
+    parser.add_argument(
+        "-g", "--group", type=int, help="OMERO group ID (batch mode only)."
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="Parallel workers for batch mode (default: 8).",
+    )
     add_creds_args(parser)
     parser.set_defaults(handler=run)
 
@@ -196,7 +302,9 @@ def _validate_args(args: argparse.Namespace) -> None:
     if args.mpp is not None and args.mpp <= 0:
         raise SystemExit(f"error: --mpp must be positive, got {args.mpp}.")
     if args.downsample is not None and args.downsample <= 0:
-        raise SystemExit(f"error: --downsample must be positive, got {args.downsample}.")
+        raise SystemExit(
+            f"error: --downsample must be positive, got {args.downsample}."
+        )
     if args.background_margin is not None and args.background_margin < 0:
         raise SystemExit(
             f"error: --background-margin must be zero or greater, got {args.background_margin}."
@@ -232,16 +340,20 @@ def _build_params(args: argparse.Namespace):
     else:
         background_label = args.background_label or DEFAULT_BACKGROUND_LABEL
         background_margin = float(
-            DEFAULT_BACKGROUND_MARGIN if args.background_margin is None
+            DEFAULT_BACKGROUND_MARGIN
+            if args.background_margin is None
             else args.background_margin
         )
         max_background_tiles = (
-            DEFAULT_MAX_BACKGROUND_TILES if args.max_background_tiles is None
+            DEFAULT_MAX_BACKGROUND_TILES
+            if args.max_background_tiles is None
             else args.max_background_tiles
         )
 
     exclude_text = (
-        list(DEFAULT_EXCLUDE_TEXT) if args.exclude_text is None else list(args.exclude_text)
+        list(DEFAULT_EXCLUDE_TEXT)
+        if args.exclude_text is None
+        else list(args.exclude_text)
     )
 
     return TileParams(
@@ -280,7 +392,10 @@ def _tile_one(conn, image, args: argparse.Namespace, params):
     from lavlab.tiling import tile_slide
 
     return tile_slide(
-        conn, image, params, args.out,
+        conn,
+        image,
+        params,
+        args.out,
         override=args.override,
         skip_existing=args.skip_existing,
         force_local=args.force_local,
@@ -301,14 +416,16 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
         try:
             result = _tile_one(conn, image, args, params)
         except TilingError as exc:
-            raise SystemExit(f"error: image {image_id}: {exc}")
+            raise SystemExit(f"error: image {image_id}: {exc}") from None
 
         if result.status == "skipped":
             print(f"Image {image_id}: skipped ({result.reason}).")
         elif result.status == "unannotated":
             print(f"Image {image_id}: no ROIs, nothing tiled.")
         else:
-            counts = ", ".join(f"{k}={v}" for k, v in sorted(result.label_counts.items()))
+            counts = ", ".join(
+                f"{k}={v}" for k, v in sorted(result.label_counts.items())
+            )
             print(
                 f"Completed tile for image {image_id}: {result.slide_dir} "
                 f"({counts or 'no tiles'}, tier {result.tier})"
@@ -385,20 +502,28 @@ def _summarise_batch(image_ids, results) -> None:
 
     log.info(
         "Batch complete: %d/%d slides tiled, %d skipped, %d unannotated, %d failed.",
-        done, len(image_ids), skipped, unannotated, failed,
+        done,
+        len(image_ids),
+        skipped,
+        unannotated,
+        failed,
     )
 
     tiers = Counter(r.tier for r in results if r.status == "done" and r.tier)
     if tiers:
-        log.info("Served by tier: %s",
-                 ", ".join(f"{tier}={count}" for tier, count in sorted(tiers.items())))
+        log.info(
+            "Served by tier: %s",
+            ", ".join(f"{tier}={count}" for tier, count in sorted(tiers.items())),
+        )
 
     labels: Counter = Counter()
     for result in results:
         labels.update(result.label_counts)
     if labels:
-        log.info("Tiles by label: %s",
-                 ", ".join(f"{label}={count}" for label, count in sorted(labels.items())))
+        log.info(
+            "Tiles by label: %s",
+            ", ".join(f"{label}={count}" for label, count in sorted(labels.items())),
+        )
         log.info("Total tiles: %d", sum(labels.values()))
 
     for status, heading in (
@@ -422,7 +547,9 @@ def _run_batch(args: argparse.Namespace) -> None:
     params = _build_params(args)
     log.info("Starting %d workers.", args.workers)
     ctx = multiprocessing.get_context("fork")
-    with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args, params)) as pool:
+    with ctx.Pool(
+        args.workers, initializer=_init_worker, initargs=(args, params)
+    ) as pool:
         conn = connect_from_args(args)
         try:
             image_ids = list(iter_image_ids(conn, args.group))

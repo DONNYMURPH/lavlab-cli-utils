@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 try:
-    import omero.gateway  # noqa: F401  -- primes omero.model.* attribute access
+    import omero.gateway
     import omero.model
     from omero.rtypes import rint, rlong, rstring
     from omero_model_LineI import LineI
@@ -83,7 +83,14 @@ def test_safe_filename_empty_or_none_falls_back():
 
 def test_build_roi_polygon_shape():
     annotation = Annotation(
-        shapes=[ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]], label="tumor", color=(200, 50, 50))],
+        shapes=[
+            ShapeSpec(
+                POLYGON,
+                [[0, 0], [10, 0], [10, 10], [0, 10]],
+                label="tumor",
+                color=(200, 50, 50),
+            )
+        ],
         source_id="abc-123",
     )
     roi = build_roi(image_id=362, annotation=annotation)
@@ -100,7 +107,9 @@ def test_build_roi_polygon_shape():
 
 
 def test_build_roi_fill_alpha_zero_means_outline_only():
-    annotation = Annotation(shapes=[ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]])])
+    annotation = Annotation(
+        shapes=[ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]])]
+    )
     roi = build_roi(image_id=1, annotation=annotation, fill_alpha=0)
     shape = roi.copyShapes()[0]
     assert shape.getFillColor() is None
@@ -108,11 +117,13 @@ def test_build_roi_fill_alpha_zero_means_outline_only():
 
 def test_build_roi_mixed_kinds_produces_multiple_shape_types():
     # The core scenario from the round-trip fix: one ROI, several kinds.
-    annotation = Annotation(shapes=[
-        ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]], label="tumor"),
-        ShapeSpec(POINT, [[5, 5]], label="marker"),
-        ShapeSpec(POLYLINE, [[0, 0], [1, 1], [2, 0]], label="line"),
-    ])
+    annotation = Annotation(
+        shapes=[
+            ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]], label="tumor"),
+            ShapeSpec(POINT, [[5, 5]], label="marker"),
+            ShapeSpec(POLYLINE, [[0, 0], [1, 1], [2, 0]], label="line"),
+        ]
+    )
     roi = build_roi(image_id=1, annotation=annotation)
     shapes = roi.copyShapes()
 
@@ -124,7 +135,9 @@ def test_build_roi_mixed_kinds_produces_multiple_shape_types():
 
 
 def test_build_roi_no_provenance_no_description():
-    annotation = Annotation(shapes=[ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]])])
+    annotation = Annotation(
+        shapes=[ShapeSpec(POLYGON, [[0, 0], [10, 0], [10, 10], [0, 10]])]
+    )
     roi = build_roi(image_id=1, annotation=annotation)
     assert roi.getDescription() is None
 
@@ -279,7 +292,10 @@ def test_export_image_degenerate_polygon_warns_no_usable_shapes():
     result = export_image(conn, image_id=362)
 
     assert result.features == []
-    assert any("ROI 99" in w and "no usable shapes after conversion" in w for w in result.warnings)
+    assert any(
+        "ROI 99" in w and "no usable shapes after conversion" in w
+        for w in result.warnings
+    )
 
 
 def test_export_image_seam_duplicate_polygon_exports_successfully():
@@ -367,7 +383,11 @@ class _FakeConnForIter:
         self._projects = projects or {}
 
     def getObject(self, type_, id_):
-        return {"Image": self._images, "Dataset": self._datasets, "Project": self._projects}[type_].get(id_)
+        return {
+            "Image": self._images,
+            "Dataset": self._datasets,
+            "Project": self._projects,
+        }[type_].get(id_)
 
 
 def test_iter_images_by_image_id():
@@ -450,7 +470,9 @@ class _FakeGeojsonConn:
     def deleteObject(self, obj):
         self.deleted.append(obj)
 
-    def createFileAnnfromLocalFile(self, path, origFilePathAndName=None, mimetype=None, ns=None):
+    def createFileAnnfromLocalFile(
+        self, path, origFilePathAndName=None, mimetype=None, ns=None
+    ):
         self.uploaded.append((path, origFilePathAndName, mimetype, ns))
         return _FakeGeojsonAnn(origFilePathAndName, ns)
 
@@ -465,9 +487,13 @@ def test_geojson_annotation_name_matches_local_export_filename():
 def test_has_uploaded_geojson_true_and_false():
     from lavlab.geojson.omero_io import GEOJSON_NAMESPACE, has_uploaded_geojson
 
-    present = _FakeGeojsonImage(anns=[
-        _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE)
-    ])
+    present = _FakeGeojsonImage(
+        anns=[
+            _FakeGeojsonAnn(
+                "N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE
+            )
+        ]
+    )
     assert has_uploaded_geojson(present) is True
     assert has_uploaded_geojson(_FakeGeojsonImage()) is False
 
@@ -487,9 +513,7 @@ def test_upload_geojson_uses_namespace_and_mimetype(tmp_path):
     remote = upload_geojson(conn, image, str(local))
 
     assert remote == "N101_S06_HE.ome.tiff__omero-362.geojson"
-    assert conn.uploaded == [
-        (str(local), remote, GEOJSON_MIMETYPE, GEOJSON_NAMESPACE)
-    ]
+    assert conn.uploaded == [(str(local), remote, GEOJSON_MIMETYPE, GEOJSON_NAMESPACE)]
     assert len(image.linked) == 1
 
 
@@ -498,7 +522,9 @@ def test_upload_geojson_replaces_previous_upload(tmp_path):
 
     local = tmp_path / "x.geojson"
     local.write_text("{}", encoding="utf-8")
-    stale = _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE)
+    stale = _FakeGeojsonAnn(
+        "N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE
+    )
     image = _FakeGeojsonImage(anns=[stale])
     conn = _FakeGeojsonConn()
 
@@ -515,19 +541,23 @@ def test_geojson_namespace_does_not_collide_with_lr_or_roi():
     from lavlab.large_recon import has_cached_recon
     from lavlab.roi import has_uploaded_mask
 
-    image = _FakeGeojsonImage(anns=[
-        _FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10"),
-        _FakeGeojsonAnn("LR10_N101_S06_HE__annot.jp2", "LargeRecon.10.roi"),
-        _FakeGeojsonAnn("N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE),
-    ])
+    image = _FakeGeojsonImage(
+        anns=[
+            _FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10"),
+            _FakeGeojsonAnn("LR10_N101_S06_HE__annot.jp2", "LargeRecon.10.roi"),
+            _FakeGeojsonAnn(
+                "N101_S06_HE.ome.tiff__omero-362.geojson", GEOJSON_NAMESPACE
+            ),
+        ]
+    )
 
     assert has_cached_recon(image, 10, "jp2") is True
     assert has_uploaded_mask(image, 10, "_annot", "jp2") is True
     assert has_uploaded_geojson(image) is True
 
     # and none of them sees the others when its own is missing
-    lr_only = _FakeGeojsonImage(anns=[
-        _FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10")
-    ])
+    lr_only = _FakeGeojsonImage(
+        anns=[_FakeGeojsonAnn("LR10_N101_S06_HE.jp2", "LargeRecon.10")]
+    )
     assert has_uploaded_geojson(lr_only) is False
     assert has_uploaded_mask(lr_only, 10, "_annot", "jp2") is False

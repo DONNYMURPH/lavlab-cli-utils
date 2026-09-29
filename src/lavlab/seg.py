@@ -23,16 +23,16 @@ import json
 import logging
 import os
 import re
+from collections.abc import Generator
 from importlib import resources
 from pathlib import Path
-from typing import Generator
 
 import highdicom
 import highdicom.seg as hdseg
 import nibabel as nib
 import numpy as np
 import pydicom
-import SimpleITK as sitk
+import SimpleITK as sitk  # noqa: N813
 from pydicom.sr.coding import Code
 
 log = logging.getLogger(__name__)
@@ -73,7 +73,9 @@ def format_output_path(output_dir: str, nii_name: str, seg_name: str) -> str:
     :return: the formatted output path
     :rtype: str
     """
-    return os.path.join(output_dir, f"{nii_name}_{_safe_path_component(seg_name)}.nii.gz")
+    return os.path.join(
+        output_dir, f"{nii_name}_{_safe_path_component(seg_name)}.nii.gz"
+    )
 
 
 def read_nii(nii_path: str) -> sitk.Image:
@@ -315,7 +317,9 @@ def _load_segment_descriptions(
     return descriptions
 
 
-def _read_series_in_slice_order(dicom_series_paths: list[Path]) -> list[pydicom.Dataset]:
+def _read_series_in_slice_order(
+    dicom_series_paths: list[Path],
+) -> list[pydicom.Dataset]:
     """Read a DICOM series and sort it into ascending slice order.
 
     Sorted by ``ImagePositionPatient``'s through-plane component when every
@@ -383,7 +387,9 @@ def nifti_to_dcmseg(
     if not dicom_series_paths:
         raise FileNotFoundError(f"no .dcm files found in {dicom_dir}")
 
-    resolved_template = Path(template_path) if template_path else _default_seg_template_path()
+    resolved_template = (
+        Path(template_path) if template_path else _default_seg_template_path()
+    )
     if not resolved_template.is_file():
         raise FileNotFoundError(
             f"segment-attributes template not found: {resolved_template}"
@@ -412,7 +418,9 @@ def nifti_to_dcmseg(
         sop_instance_uid=highdicom.UID(),
         instance_number=template.get("instance_number", 1),
         manufacturer=template.get("manufacturer", "LavLab"),
-        manufacturer_model_name=template.get("manufacturer_model_name", "lavlab-cli-utils"),
+        manufacturer_model_name=template.get(
+            "manufacturer_model_name", "lavlab-cli-utils"
+        ),
         software_versions=template.get("software_versions", "0.1.0"),
         device_serial_number=template.get("device_serial_number", "NA"),
         content_label=template.get("content_label", "SEGMENTATION"),

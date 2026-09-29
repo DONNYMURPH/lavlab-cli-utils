@@ -141,8 +141,10 @@ def _upload_and_replace(
         image.removeAnnotations([ann])
         conn.deleteObject(ann._obj)
     file_ann = conn.createFileAnnfromLocalFile(
-        output_path, origFilePathAndName=remote_name,
-        mimetype=_mimetype_for_ext(ext), ns=namespace,
+        output_path,
+        origFilePathAndName=remote_name,
+        mimetype=_mimetype_for_ext(ext),
+        ns=namespace,
     )
     image.linkAnnotation(file_ann)
 
@@ -189,7 +191,9 @@ def fetch_large_recon(
         if ann is not None:
             log.info(
                 "Image %d: found cached .%s large-recon (namespace %s); downloading...",
-                image_id, ext, namespace,
+                image_id,
+                ext,
+                namespace,
             )
             try:
                 _download_annotation(ann, output_path)
@@ -197,10 +201,14 @@ def fetch_large_recon(
                 log.warning(
                     "Image %d: cached .%s recon could not be downloaded; "
                     "falling back to regeneration.",
-                    image_id, ext, exc_info=True,
+                    image_id,
+                    ext,
+                    exc_info=True,
                 )
             else:
-                log.info("Image %d: downloaded cached recon to %s.", image_id, output_path)
+                log.info(
+                    "Image %d: downloaded cached recon to %s.", image_id, output_path
+                )
                 return "annotation"
 
     src_path = get_source_file_path(conn, image_id)
@@ -210,8 +218,11 @@ def fetch_large_recon(
     tier: Tier = "network"
 
     if have_local:
-        log.info("Image %d: no usable cache; generating from local source %s...",
-                  image_id, src_path)
+        log.info(
+            "Image %d: no usable cache; generating from local source %s...",
+            image_id,
+            src_path,
+        )
         try:
             img = load_downsampled(src_path, downsample)
         except _LOCAL_SOURCE_ERRORS as exc:
@@ -220,7 +231,11 @@ def fetch_large_recon(
                 "Falling back to tier 3 (OMERO tile API), which is much "
                 "slower. If this happens for every image, the mounted "
                 "repository is not readable and should be investigated.",
-                image_id, src_path, type(exc).__name__, exc, exc_info=True,
+                image_id,
+                src_path,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
             )
         else:
             tier = "local"
@@ -229,12 +244,14 @@ def fetch_large_recon(
         if have_local:
             log.info(
                 "Image %d: generating over the network instead (this can take "
-                "several minutes)...", image_id,
+                "several minutes)...",
+                image_id,
             )
         else:
             log.info(
                 "Image %d: no usable cache or local source; generating over the "
-                "network (this can take several minutes)...", image_id,
+                "network (this can take several minutes)...",
+                image_id,
             )
         img = generate_over_network(conn, image, downsample)
         tier = "network"
@@ -246,15 +263,21 @@ def fetch_large_recon(
 
     if not skip_upload and cache_eligible:
         remote_name = build_filename(downsample, image.getName(), ext=ext)
-        log.info("Image %d: uploading recon to OMERO as %s (namespace %s)...",
-                  image_id, remote_name, namespace)
+        log.info(
+            "Image %d: uploading recon to OMERO as %s (namespace %s)...",
+            image_id,
+            remote_name,
+            namespace,
+        )
         try:
             _upload_and_replace(conn, image, namespace, output_path, ext, remote_name)
         except Exception:
             log.warning(
                 "Image %d: large-recon written to '%s' but upload to OMERO "
                 "failed; future runs will regenerate instead of reusing it.",
-                image_id, output_path, exc_info=True,
+                image_id,
+                output_path,
+                exc_info=True,
             )
         else:
             log.info("Image %d: uploaded and linked as %s.", image_id, remote_name)

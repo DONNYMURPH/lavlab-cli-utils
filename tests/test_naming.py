@@ -81,7 +81,9 @@ def _bundled_entries_against(tmp_path):
     base_dir to tmp_path so it's testable without /Volumes/Siren mounted."""
     fs_map = load_fs_map(None)
     group = fs_map["1"]
-    retargeted = [dataclasses.replace(entry, base_dir=str(tmp_path)) for entry in group.maps]
+    retargeted = [
+        dataclasses.replace(entry, base_dir=str(tmp_path)) for entry in group.maps
+    ]
     return {"1": dataclasses.replace(group, maps=retargeted)}
 
 

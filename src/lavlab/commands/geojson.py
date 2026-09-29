@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: MIT
 """``lavlab geojson`` -- move QuPath GeoJSON annotations in and out of OMERO.
 
-    lavlab geojson import slide.geojson --image 1 -u you -s omero
-    lavlab geojson import ./backups/ --dataset 5 -u you -s omero
-    lavlab geojson import --map restore.csv -u you -s omero
-    lavlab geojson export --project 2 --out ./archive/ -u you -s omero
+lavlab geojson import slide.geojson --image 1 -u you -s omero
+lavlab geojson import ./backups/ --dataset 5 -u you -s omero
+lavlab geojson import --map restore.csv -u you -s omero
+lavlab geojson export --project 2 --out ./archive/ -u you -s omero
 """
 
 from __future__ import annotations
@@ -41,7 +41,9 @@ def add_parser(subparsers) -> None:
     geojson_parser = subparsers.add_parser(
         "geojson", help="Move QuPath GeoJSON annotations in and out of OMERO."
     )
-    geojson_subparsers = geojson_parser.add_subparsers(dest="geojson_action", required=True)
+    geojson_subparsers = geojson_parser.add_subparsers(
+        dest="geojson_action", required=True
+    )
 
     importer = geojson_subparsers.add_parser(
         "import", help="create OMERO ROIs from GeoJSON files"
@@ -71,9 +73,7 @@ def add_parser(subparsers) -> None:
     source.add_argument("--image", type=int)
     source.add_argument("--dataset", type=int)
     source.add_argument("--project", type=int)
-    source.add_argument(
-        "--group", type=int, help="every image in this OMERO group"
-    )
+    source.add_argument("--group", type=int, help="every image in this OMERO group")
     output = exporter.add_argument_group("output")
     output.add_argument(
         "--out", help="directory to write into (required unless --skip-local)"
@@ -105,7 +105,7 @@ def add_parser(subparsers) -> None:
         "--upload",
         action="store_true",
         help="also attach the exported GeoJSON to the image in OMERO, under the "
-             "lavlab.geojson namespace",
+        "lavlab.geojson namespace",
     )
     output.add_argument(
         "--skip-existing",
@@ -116,7 +116,7 @@ def add_parser(subparsers) -> None:
         "--skip-local",
         action="store_true",
         help="keep no local copy -- write to a temporary file, upload it, delete it. "
-             "Requires --upload; makes --out unnecessary",
+        "Requires --upload; makes --out unnecessary",
     )
     add_creds_args(exporter)
     exporter.add_argument("--dry-run", action="store_true")
@@ -171,7 +171,9 @@ def _pairs_from_map(map_path: str) -> list[tuple]:
             if not row or row[0].lstrip().startswith("#"):
                 continue
             if len(row) < 2:
-                raise SystemExit(f"error: {map_path}:{lineno}: expected 'path,image_id'")
+                raise SystemExit(
+                    f"error: {map_path}:{lineno}: expected 'path,image_id'"
+                )
             path, raw_id = row[0].strip(), row[1].strip()
             if lineno == 1 and not raw_id.lstrip("-").isdigit():
                 continue
@@ -214,9 +216,7 @@ def run_import(args: argparse.Namespace) -> None:
             f"(got {', '.join(chosen) or 'none'})"
         )
     if args.map and args.paths:
-        raise SystemExit(
-            "error: --map already lists the files; do not also pass paths"
-        )
+        raise SystemExit("error: --map already lists the files; do not also pass paths")
     if not args.map and not args.paths:
         raise SystemExit("error: no input files given")
 
@@ -349,7 +349,10 @@ def run_export(args: argparse.Namespace) -> None:
     images = written = features = skipped = 0
     try:
         for image in iter_images(
-            conn, image=args.image, dataset=args.dataset, project=args.project,
+            conn,
+            image=args.image,
+            dataset=args.dataset,
+            project=args.project,
             group=args.group,
         ):
             images += 1
@@ -399,9 +402,7 @@ def run_export(args: argparse.Namespace) -> None:
                     )
 
             if not args.dry_run:
-                text = dump_geojson(
-                    result.features, indent=None if args.compact else 1
-                )
+                text = dump_geojson(result.features, indent=None if args.compact else 1)
                 if args.skip_local:
                     local_path = make_temp_path("geojson")
                 else:
@@ -417,7 +418,8 @@ def run_export(args: argparse.Namespace) -> None:
                         except Exception:
                             log.warning(
                                 "Image %d: exported but upload to OMERO failed.",
-                                image.getId(), exc_info=True,
+                                image.getId(),
+                                exc_info=True,
                             )
                         else:
                             print(f"    uploaded as {filename}")
