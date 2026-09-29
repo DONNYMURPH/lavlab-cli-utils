@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lavlab-cli-utils"
-version = "0.1.0"
+version = "1.0.0"
 description = "LAVLab CLI utilities for pulling large recons and ROI masks from OMERO, moving QuPath GeoJSON annotations in and out of OMERO, and converting between DICOM SEG and NIfTI."
 requires-python = ">=3.10"
 dependencies = []

@@ -81,7 +81,7 @@ SUBSAMPLES_PER_TILE = 8
 
 DEFAULT_EXCLUDE_TEXT = ("exclusion roi",)
 
-DEFAULT_BACKGROUND_LABEL = "benign"
+DEFAULT_BACKGROUND_LABEL = "non-regign of interest"
 
 JP2_SUFFIXES = (".jp2", ".j2k", ".jpf", ".jpx", ".jpc")
 
