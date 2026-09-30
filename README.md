@@ -233,61 +233,125 @@ suffix.
 
 ### `lavlab tile` -- cut slides into training tiles
 
+Cuts fixed-size tiles for a Gleason-grade classifier (or any
+ROI-labelled dataset), plus whole-slide tiles for inference. Exactly one of
+`--whole` or `--roi` is required; `--roi` also needs `--all` or at least one
+`-t/--text-filter` (a `textValue` or a class folder name, case-insensitive).
+`lavlab tile --help` lists every flag in groups and ends with examples.
+
+#### Recipes
+
+**1. Check before you extract.** `--dry-run` works out every tile and
+prints counts per class and per ROI, plus any ROIs too small to hold a
+tile, without reading a single full-resolution pixel or writing anything:
+
 ```sh
-# one slide, chosen classes
-lavlab tile 12345 --roi -t G3 -t G4cg -t G4fg -t G5 --mpp 0.5 --size 224 -o ./tiles
-# one slide, every annotation
-lavlab tile 12345 --roi --all -o ./tiles
-# whole slide, tissue only (inference, or an unannotated slide)
-lavlab tile 12345 --whole --mpp 0.5 --size 224 -o ./tiles
-# a whole group
-lavlab tile batch -g 3 --workers 8 --roi --all --skip-existing -o ./tiles
+lavlab tile 12345 --roi --all --size 512 --dry-run -o ./tiles
+lavlab tile batch -g 3 --roi --all --size 512 --dry-run -o ./tiles   # whole group, totals at the end
 ```
 
-Cuts fixed-size tiles for a Gleason-grade classifier. Exactly one of
-`--whole` or `--roi` is required; `--roi` additionally needs `--all` or at
-least one `-t/--text-filter` (which matches either a `textValue` or a class
-folder name, case-insensitively).
+This is the cheap way to answer "do I have enough G4 cribriform?", and to
+check that `--erode` (on by default, see below) isn't wiping out your small
+ROIs.
+
+**2. Build a training set.** The usual run: every annotation, 512 px tiles
+at 0.5 um/px, JPEG, one combined index for the whole dataset, resumable:
+
+```sh
+lavlab tile batch -g 3 --roi --all --size 512 --format jpg \
+    --skip-existing --manifest ./tiles/dataset.csv -o ./tiles
+```
+
+Only some classes:
+
+```sh
+lavlab tile batch -g 3 --roi -t G3 -t G4cg -t G4fg -t G5 --size 512 \
+    --manifest ./tiles/dataset.csv -o ./tiles
+```
+
+Point several commands (different groups, classes or settings) at the same
+`--manifest` and it accumulates into one file; rows already in it aren't
+repeated.
+
+**3. Two scales per tile (detail + context).** `--scales` cuts concentric
+crops around the same centre in one pass -- far cheaper than extracting
+twice. The pairs share a name apart from the scale:
+
+```sh
+lavlab tile batch -g 3 --roi --all --size 512 --scales 0.5,1.0 -o ./tiles
+# -> ..._x76800_y112640_mpp0.5.png  and  ..._x76800_y112640_mpp1.0.png
+```
+
+The finest scale decides which tiles are kept and their labels; the coarser
+crop is context around it. `--erode` is measured at that finest scale too,
+so the context crop can reach past the ROI edge -- the run logs by how much.
+If you need *every* scale inside the ROI, erode by half the coarsest crop:
+`--size 512 --scales 0.5,1.0 --erode 256` (512 px x 1.0 um/px / 2).
+
+**4. Whole-slide tiles for inference.** Every tissue tile, overlapping by
+half:
+
+```sh
+lavlab tile 12345 --whole --size 512 --stride 256 -o ./inference
+```
+
+**5. Interrupted? Run the same command again with `--skip-existing`.**
+Finished slides are skipped, and a slide that was cut off partway picks up
+from the tiles it already wrote instead of starting over.
+
+**6. A quick look at a few tiles.** Cap the per-slide count:
+
+```sh
+lavlab tile 12345 --roi --all --max-tiles 50 -o ./scratch
+```
+
+#### Tuning
+
+| If... | Try |
+|---|---|
+| Cribriform / big-lumen glands are missing | `--tissue-threshold 0.25` (default `0.5`): lumens read as glass |
+| Small ROIs produce no tiles | Check with `--dry-run`; smaller `--size`, or `--erode 0` to fall back to coverage-only labelling |
+| Too many benign tiles | `--max-background-tiles 500` (default `2000` per slide), or `--no-background` |
+| Classes badly imbalanced | `--max-tiles-per-label N` |
+| Disk filling up | `--format jpg` (quality `90`; `--quality` to change) |
+| Network fetches are the bottleneck | `--connections 8` (default `4` per slide), and/or more `--workers` |
+| Want the same tiles every time | They already are: sampling is seeded (`--seed`, default `0`) |
+
+#### How it decides
 
 **Scale.** `--mpp` (default `0.5`) is read against the image's own
 `getPixelSizeX`/`Y` to pick a pyramid level and a resize factor, so tiles
 from a 20x and a 40x scan come out at the same magnification. An image
 with no physical pixel size recorded is a hard error naming `--downsample
-N`, which sets the factor directly. The two are mutually exclusive.
-
-**Output layout**, with `X`/`Y` the tile's *level-0* top-left corner:
-
-```text
-<out>/<subject>/<slide_stem>/
-  <label>/<slide_stem>_x{X}_y{Y}.png     # --roi
-  whole/<slide_stem>_x{X}_y{Y}.png       # --whole
-  manifest.csv
-  tile_params.json
-```
-
-`<slide_stem>` comes from `naming.get_stem`, so it matches `lr`/`roi`
-output names. `<subject>` is the leading `N###` token of the image name
-(`N101_S08_HE` -> `N101`), used verbatim -- it is deliberately *not*
-translated to the on-disk subject directory, whose naming the bundled
-`fs_map` gets wrong in known ways. A name with no such token lands in
-`unknown_subject/` with a warning. `manifest.csv` is written to a temp file
-and renamed into place at the end, so an aborted run never leaves one that
-looks complete.
+N`, which sets the factor directly. `--mpp`, `--scales` and `--downsample`
+are mutually exclusive; `--stride` and `--overlap` are two ways to set the
+same spacing.
 
 **Which tiles get kept.** Everything is decided on one low-resolution
 thumbnail per slide -- tissue by Otsu on saturation, ROI coverage by
 rasterising the annotations and reading integral images -- and full-res
-pixels are only read for tiles that already passed. A 40x whole-mount grids
-to 80-100k tiles, so `--coords-only` (manifest only, no image files) is
-there for surveying a slide without materialising them. In order:
+pixels are only read for tiles that already passed. In order:
 
 - below `--tissue-thresh` (default `0.5`) tissue: dropped.
 - overlapping an exclusion ROI *at all*: dropped. `--exclude-text`
   (repeatable, default `exclusion roi` -- the palette's own label) sets
   which `textValue`s count, and it applies in `--whole` mode too.
-- at or above `--min-coverage` (default `0.5`) of one class: takes that
-  class, highest-covering one if several qualify.
+- at or above `--min-coverage` (default `0.5`) of one class, **and** centred
+  far enough inside that class's ROI (`--erode`): takes that class,
+  highest-covering one if several qualify. Enough coverage but too near the
+  edge: dropped -- never called benign.
 - otherwise, possibly benign -- see below.
+
+**`--erode`** (default `auto` = half a tile). A tile may only take a class
+if its centre lies at least this far inside that class's ROI; at half a
+tile, that means the whole tile lies inside the ROI, so a tile can't be
+labelled by an annotation it only half overlaps. Give micrometres
+(`--erode 128`) to set it explicitly. `--erode 0` turns it off and warns
+every run: coverage alone lets a tile that straddles an ROI edge take that
+class, which is the label noise erosion is there to remove. The inset
+actually applied is shown by `--dry-run` and saved in `tile_params.json`.
+ROIs too small to hold a tile are listed by `--dry-run` and counted in
+every summary -- useful information about your annotation sizes in itself.
 
 **The benign rule (`--roi` only).** Annotators mark *everything* on a slide
 they work on: cancer, atrophy, HGPIN, exclusions. So tissue that falls
@@ -312,16 +376,70 @@ tiles every time.
 flat `whole/` folder and is never treated as a benign class. Use it for
 inference, or for slides nobody has annotated.
 
-**Pixel tiers.** Like `lr`, but with only two -- there is no cached-recon
-tier for tiles:
+#### What you get
+
+```text
+<out>/<subject>/<slide_stem>/
+  <label>/<slide_stem>_x{X}_y{Y}.png            # --roi (X, Y = level-0 top-left)
+  <label>/<slide_stem>_x{CX}_y{CY}_mpp{S}.png   # --roi --scales (CX, CY = level-0 centre)
+  whole/<slide_stem>_x{X}_y{Y}.png              # --whole
+  manifest.csv
+  tile_params.json
+```
+
+`<slide_stem>` comes from `naming.get_stem`, so it matches `lr`/`roi`
+output names. `<subject>` is the leading `N###` token of the image name
+(`N101_S08_HE` -> `N101`), used verbatim -- it is deliberately *not*
+translated to the on-disk subject directory, whose naming the bundled
+`fs_map` gets wrong in known ways. A name with no such token lands in
+`unknown_subject/` with a warning.
+
+**`manifest.csv`** has one row per tile file, starting with the columns a
+dataset loader needs:
+
+```text
+tile_path,omero_image_id,case_id,slide_id,roi_id,label,x,y,mpp,size,...
+N101/N101_S08_HE/G3/N101_S08_HE_x76288_y112128.png,12345,N101,N101_S08_HE,551,G3,76800,112640,0.5,512,...
+```
+
+`case_id` is the subject, for patient-level train/test splits; `roi_id` is
+the OMERO ROI the tile came from; `x`/`y` are the tile's level-0 *centre*
+(shared by every `--scales` crop of one tile). The remaining columns
+(`shape_id`, the level-0 box, pyramid level, coverage, tissue fraction,
+tier) record how each tile was chosen -- see
+[`docs/reference.md`](docs/reference.md) for all of them. `--manifest`
+writes the same columns, with `tile_path` relative to the CSV's own
+folder so the index and tiles can be moved together.
+
+**Every tile describes itself**, too: the image ID, ROI ID, label, centre
+and mpp are embedded in the file (a PNG text chunk, or JPEG EXIF), so a
+tile that ends up on its own is still traceable:
+
+```python
+from PIL import Image
+Image.open("tile.png").text["lavlab"]      # PNG
+Image.open("tile.jpg").getexif()[270]      # JPEG
+```
+
+`tile_params.json` records every setting that affects the output;
+`--skip-existing` compares against it, so a slide tiled with *different*
+settings is warned about and skipped rather than mixing two settings in one
+directory -- the global `--override` flag (before the subcommand: `lavlab
+--override tile ...`) re-tiles it. Output from an older lavlab version
+counts as different settings.
+
+#### Where the pixels come from
+
+Like `lr`, but with only two tiers -- there is no cached-recon tier for
+tiles:
 
 1. **Local source file**, when OMERO's managed repository is mounted where
    `tile` runs (true on the cluster, not on a workstation). Regions are
    cropped straight out of the source pyramid with pyvips random access --
    never a whole level into memory, since these slides reach ~220k x 260k.
 2. **OMERO's tile API**, otherwise. Only regions containing kept tiles are
-   fetched, batched a grid-band at a time rather than a round trip per
-   tile.
+   fetched, batched a grid-band at a time over `--connections` parallel
+   connections, rather than a round trip per tile.
 
 The tier used is logged per slide and recorded in every manifest row. A
 local source that won't decode falls forward to the network tier with a
@@ -351,14 +469,8 @@ expects, and lists the non-Gleason palette labels (`Atrophy`, `HGPIN`,
 them. With `--all`, an unmapped `textValue` becomes a sanitized folder of
 its own, warned about once per slide.
 
-**`--skip-existing`** skips slides whose `manifest.csv` and
-`tile_params.json` show a finished run with these same parameters. A slide
-tiled with *different* parameters is warned about and skipped too, rather
-than mixing two settings in one directory -- the global `--override` flag
-(before the subcommand: `lavlab --override tile ...`) re-tiles it.
-
 Batch mode matches `lr batch`/`roi batch`: per-slide failures warn and
-continue, and the run ends with per-tier, per-label and
+continue, and the run ends with per-tier, per-label, ROI/erosion and
 done/skipped/unannotated/failed totals, with the image IDs for each.
 
 ### `lavlab meta roi textvalue` -- backfill ROI comments from stroke color

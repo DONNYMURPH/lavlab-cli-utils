@@ -43,7 +43,7 @@ import re
 import tempfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -89,24 +89,33 @@ JP2_SUFFIXES = (".jp2", ".j2k", ".jpf", ".jpx", ".jpc")
 MANIFEST_NAME = "manifest.csv"
 PARAMS_NAME = "tile_params.json"
 
+# The first ten columns are the dataset contract: enough to find, group
+# (by case/slide/ROI) and re-cut every tile. x/y are the tile's *centre* in
+# level-0 pixels, so concentric crops from --scales share them. The rest
+# record how the tile was chosen and read.
 MANIFEST_COLUMNS = (
-    "image_id",
-    "subject",
-    "slide_stem",
+    "tile_path",
+    "omero_image_id",
+    "case_id",
+    "slide_id",
+    "roi_id",
     "label",
-    "path",
+    "x",
+    "y",
+    "mpp",
+    "size",
+    "shape_id",
     "x0",
     "y0",
     "w0",
     "h0",
     "level",
-    "mpp",
-    "size",
     "coverage",
     "tissue_frac",
-    "roi_id",
     "tier",
 )
+
+DEFAULT_JPEG_QUALITY = 90
 
 WHOLE_LABEL = "whole"
 
@@ -660,6 +669,113 @@ def dilate_mask(mask: np.ndarray, radius_px: float) -> np.ndarray:
     return np.asarray(morphology.dilation(mask, morphology.disk(radius)), dtype=bool)
 
 
+def erode_mask(mask: np.ndarray, radius_px: float) -> np.ndarray:
+    """Shrink a mask by *radius_px* with a square, for ``--erode`` reporting.
+
+    Used only to count ROIs with no room left for a tile centre; the
+    per-tile test itself is :func:`center_boxes` against a summed-area
+    table, which is exact at pixel boundaries.
+
+    :param mask: boolean mask
+    :type mask: numpy.ndarray
+    :param radius_px: erosion radius in mask pixels
+    :type radius_px: float
+    :return: pixels where a ``2 * radius_px`` square around them fits in the
+        mask (the input, for a radius under one pixel)
+    :rtype: numpy.ndarray
+    """
+    from scipy import ndimage
+
+    if radius_px < 1 or not mask.any():
+        return mask
+    side = max(1, int(round(2 * radius_px)))
+    return ndimage.minimum_filter(
+        mask.astype(np.uint8), size=side, mode="constant", cval=0
+    ).astype(bool)
+
+
+def tile_center(tile: GridTile) -> tuple[int, int]:
+    """Return a tile's centre in level-0 pixels.
+
+    :param tile: the grid cell
+    :type tile: GridTile
+    :return: ``(x, y)``
+    :rtype: tuple[int, int]
+    """
+    return tile.x0 + tile.w0 // 2, tile.y0 + tile.h0 // 2
+
+
+def center_boxes(
+    tiles: Sequence[GridTile], analysis_ds: int, radius_px: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Analysis-resolution squares of half-width *radius_px* around each centre.
+
+    A tile's centre lies at least *radius_px* inside an ROI exactly when this
+    square is wholly inside it -- so ``window_fractions(...) == 1`` is the
+    ``--erode`` test. With the default half-tile radius the square *is* the
+    tile's own window, i.e. "the tile lies wholly inside the ROI".
+
+    :param tiles: the grid
+    :type tiles: Sequence[GridTile]
+    :param analysis_ds: the thumbnail's downsample factor
+    :type analysis_ds: int
+    :param radius_px: half-width in analysis pixels
+    :type radius_px: float
+    :return: ``(xs, ys, ws, hs)`` arrays in thumbnail pixels
+    :rtype: tuple[numpy.ndarray, ...]
+    """
+    if not tiles:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty, empty, empty
+    r0 = radius_px * analysis_ds
+    cx = np.array([t.x0 + t.w0 / 2 for t in tiles], dtype=np.float64)
+    cy = np.array([t.y0 + t.h0 / 2 for t in tiles], dtype=np.float64)
+    side = max(1, int(round(2 * r0 / analysis_ds)))
+    xs = np.rint((cx - r0) / analysis_ds).astype(np.int64)
+    ys = np.rint((cy - r0) / analysis_ds).astype(np.int64)
+    sides = np.full(len(tiles), side, dtype=np.int64)
+    return xs, ys, sides, sides
+
+
+def scale_tile(tile: GridTile, ds_total: float, size: int) -> GridTile:
+    """Return the tile concentric with *tile* at another scale.
+
+    :param tile: the primary-scale tile
+    :type tile: GridTile
+    :param ds_total: level-0 pixels per output pixel at the other scale
+    :type ds_total: float
+    :param size: output tile edge
+    :type size: int
+    :return: a cell with the same centre and a ``size * ds_total`` edge
+    :rtype: GridTile
+    """
+    cx, cy = tile_center(tile)
+    edge = int(round(size * ds_total))
+    return GridTile(
+        tile.col, tile.row, tile.xt, tile.yt, cx - edge // 2, cy - edge // 2, edge, edge
+    )
+
+
+def tile_fits(tile: GridTile, width0: int, height0: int) -> bool:
+    """Return whether a tile lies wholly inside the slide.
+
+    :param tile: the cell
+    :type tile: GridTile
+    :param width0: full-resolution width
+    :type width0: int
+    :param height0: full-resolution height
+    :type height0: int
+    :return: whether no part of it runs off the slide
+    :rtype: bool
+    """
+    return (
+        tile.x0 >= 0
+        and tile.y0 >= 0
+        and tile.x0 + tile.w0 <= width0
+        and tile.y0 + tile.h0 <= height0
+    )
+
+
 @dataclass
 class TileRecord:
     """One tile that survived every filter, and why it was kept."""
@@ -668,7 +784,7 @@ class TileRecord:
     label: str
     coverage: float
     tissue_frac: float
-    roi_id: int | None = None
+    shape_id: int | None = None
 
 
 def _dominant_shape_id(
@@ -695,7 +811,8 @@ def assign_labels(
     *,
     exclude_fracs: np.ndarray | None = None,
     background_fracs: np.ndarray | None = None,
-    roi_id_for: Callable[[int], int | None] | None = None,
+    shape_id_for: Callable[[int], int | None] | None = None,
+    center_ok: dict[str, np.ndarray] | None = None,
     min_coverage: float = 0.5,
     tissue_thresh: float = 0.5,
     background_label: str | None = None,
@@ -705,8 +822,11 @@ def assign_labels(
 
     In order: a tile without enough tissue is dropped; a tile touching an
     exclusion ROI at all is dropped; a tile covered at or above
-    *min_coverage* by some class takes the highest-covering one (ties broken
-    by folder name, so a rerun labels it the same way); and otherwise, if a
+    *min_coverage* by some class -- and, with *center_ok*, whose centre lies
+    in that class's eroded ROI -- takes the highest-covering one (ties
+    broken by folder name, so a rerun labels it the same way); a tile that
+    only failed the centre test is dropped as ``dropped_roi_edge``, never
+    demoted to background; and otherwise, if a
     background label is configured, a tile that is tissue but has *zero*
     coverage from any ROI on the slide becomes background.
 
@@ -728,8 +848,11 @@ def assign_labels(
     :param background_fracs: coverage by the margin-dilated union of every
         ROI, used to keep tiles near an annotation out of background
     :type background_fracs: numpy.ndarray | None
-    :param roi_id_for: maps a tile index to the ROI id that covered it
-    :type roi_id_for: Callable[[int], int | None] | None
+    :param shape_id_for: maps a tile index to the shape id that covered it
+    :type shape_id_for: Callable[[int], int | None] | None
+    :param center_ok: folder name -> whether each tile's centre lies inside
+        that class's eroded ROI; None to skip the test (no erosion)
+    :type center_ok: dict[str, numpy.ndarray] | None
     :param min_coverage: fraction of a tile that must lie in one class
     :type min_coverage: float
     :param tissue_thresh: minimum tissue fraction to keep a tile
@@ -756,15 +879,25 @@ def assign_labels(
 
         best_name: str | None = None
         best_frac = 0.0
+        near_edge = False
         for name in names:
             frac = float(label_fracs[name][index])
-            if frac >= min_coverage and frac > best_frac:
+            if frac < min_coverage:
+                continue
+            if center_ok is not None and not center_ok[name][index]:
+                near_edge = True
+                continue
+            if frac > best_frac:
                 best_name, best_frac = name, frac
 
         if best_name is not None:
-            roi_id = roi_id_for(index) if roi_id_for is not None else None
-            records.append(TileRecord(tile, best_name, best_frac, tissue, roi_id))
+            shape_id = shape_id_for(index) if shape_id_for is not None else None
+            records.append(TileRecord(tile, best_name, best_frac, tissue, shape_id))
             stats[best_name] += 1
+            continue
+
+        if near_edge:
+            stats["dropped_roi_edge"] += 1
             continue
 
         if (
@@ -1315,18 +1448,53 @@ def _cut_band(reader, band: Sequence[TileRecord], size: int):
         yield record, resize_tile(raw, size)
 
 
-def write_tile(array: np.ndarray, path: str) -> None:
+def write_tile(
+    array: np.ndarray,
+    path: str,
+    *,
+    metadata: dict | None = None,
+    quality: int | None = None,
+) -> None:
     """Write one tile to disk, format chosen by *path*'s extension.
+
+    Written to a hidden temp file and renamed into place, so an interrupted
+    run never leaves a truncated tile that a resumed run would trust.
+
+    *metadata* is embedded as JSON so a stray tile is still self-describing:
+    a PNG ``tEXt`` chunk keyed ``lavlab`` (Pillow: ``Image.open(p).text``),
+    or the EXIF ImageDescription of a JPEG (``Image.open(p).getexif()[270]``).
 
     :param array: ``(size, size, C)`` uint8 pixels
     :type array: numpy.ndarray
     :param path: the destination file
     :type path: str
+    :param metadata: values to embed in the file, or None
+    :type metadata: dict | None
+    :param quality: JPEG quality (ignored for PNG)
+    :type quality: int | None
     """
     import pyvips as pv
 
     image = pv.Image.new_from_array(array)
-    image.write_to_file(path)
+    is_jpeg = path.lower().endswith((".jpg", ".jpeg"))
+    if metadata:
+        image = image.copy()
+        text = json.dumps(metadata, sort_keys=True)
+        field_name = "exif-ifd0-ImageDescription" if is_jpeg else "png-comment-0-lavlab"
+        image.set_type(pv.GValue.gstr_type, field_name, text)
+
+    directory, name = os.path.split(path)
+    tmp_path = os.path.join(directory, f".tmp-{name}")
+    options = {"Q": int(quality)} if is_jpeg and quality else {}
+    try:
+        image.write_to_file(tmp_path, **options)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def tile_filename(slide_stem: str, record: TileRecord, fmt: str) -> str:
@@ -1342,6 +1510,28 @@ def tile_filename(slide_stem: str, record: TileRecord, fmt: str) -> str:
     :rtype: str
     """
     return f"{slide_stem}_x{record.tile.x0}_y{record.tile.y0}.{fmt}"
+
+
+def scaled_tile_filename(
+    slide_stem: str, center: tuple[int, int], mpp: float, fmt: str
+) -> str:
+    """Build a multi-scale tile's filename from its centre and scale.
+
+    Every scale of one tile shares the centre, so the pairing survives in the
+    names alone: ``..._x76800_y112640_mpp0.5.png`` / ``..._mpp1.0.png``.
+
+    :param slide_stem: the slide stem
+    :type slide_stem: str
+    :param center: level-0 ``(x, y)`` centre
+    :type center: tuple[int, int]
+    :param mpp: this crop's micrometres per pixel
+    :type mpp: float
+    :param fmt: file extension without the dot
+    :type fmt: str
+    :return: e.g. ``N101_S08_HE_x76800_y112640_mpp0.5.png``
+    :rtype: str
+    """
+    return f"{slide_stem}_x{center[0]}_y{center[1]}_mpp{float(mpp)}.{fmt}"
 
 
 @dataclass
@@ -1372,6 +1562,22 @@ class TileParams:
     max_tiles: int | None = None
     max_tiles_per_label: int | None = None
     seed: int = 0
+    # Extra concentric output scales (mpp), finest first; None = just *mpp*.
+    # The finest one is *mpp* itself and decides the grid and labels.
+    scales: list[float] | None = None
+    # --erode: None = half a tile (the default), 0 = off, else micrometres.
+    erode_um: float | None = None
+    quality: int | None = None
+
+    def output_mpps(self) -> list[float | None]:
+        """Every scale this run writes, finest (the labelling scale) first.
+
+        :return: the mpp of each output scale; ``[None]`` for --downsample
+        :rtype: list[float | None]
+        """
+        if self.scales:
+            return sorted(float(s) for s in self.scales)
+        return [self.mpp]
 
     def signature(self) -> dict:
         """Return only the fields that affect the output.
@@ -1496,6 +1702,95 @@ def write_manifest(slide_dir: str, rows: Sequence[dict]) -> str:
     return final_path
 
 
+def read_manifest(slide_dir: str) -> list[dict]:
+    """Read a slide's ``manifest.csv``, or ``[]`` if absent.
+
+    :param slide_dir: the slide's output directory
+    :type slide_dir: str
+    :return: one dict per row
+    :rtype: list[dict]
+    """
+    path = os.path.join(slide_dir, MANIFEST_NAME)
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _manifest_key(row: dict) -> tuple:
+    if row.get("tile_path"):
+        return ("path", str(row["tile_path"]))
+    return tuple(
+        str(row.get(col, ""))
+        for col in ("omero_image_id", "label", "x", "y", "mpp", "size")
+    )
+
+
+def append_manifest(manifest_path: str, rows: Sequence[dict], out_root: str) -> int:
+    """Append one slide's rows to a combined, cross-run manifest.
+
+    ``--manifest`` accumulates every slide of every run pointed at it into
+    one CSV, so a dataset extracted over several commands (one per class,
+    per group, per scale) ends up described by a single file. ``tile_path``
+    is rewritten relative to the manifest's own directory, so the manifest
+    and the tiles can be moved together.
+
+    Safe for concurrent batch workers (an exclusive ``flock`` around the
+    read-and-append), and idempotent: rows already present -- from a resumed
+    or repeated run -- are not written twice.
+
+    :param manifest_path: the combined manifest
+    :type manifest_path: str
+    :param rows: the slide's rows, ``tile_path`` relative to *out_root*
+    :type rows: Sequence[dict]
+    :param out_root: the ``-o`` directory those paths are relative to
+    :type out_root: str
+    :return: the number of rows actually appended
+    :rtype: int
+    :raises TilingError: if the file exists with different columns
+    """
+    import fcntl
+
+    manifest_path = os.path.abspath(manifest_path)
+    manifest_dir = os.path.dirname(manifest_path)
+    os.makedirs(manifest_dir, exist_ok=True)
+
+    rebased = []
+    for row in rows:
+        row = dict(row)
+        if row.get("tile_path"):
+            absolute = os.path.join(os.path.abspath(out_root), row["tile_path"])
+            row["tile_path"] = os.path.relpath(absolute, manifest_dir)
+        rebased.append(row)
+
+    with open(manifest_path, "a+", newline="") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            fh.seek(0)
+            reader = csv.DictReader(fh)
+            header = reader.fieldnames
+            if header is not None and tuple(header) != MANIFEST_COLUMNS:
+                raise TilingError(
+                    f"--manifest '{manifest_path}' has different columns from this "
+                    "lavlab version's; point --manifest at a new file."
+                )
+            seen = {_manifest_key(existing) for existing in reader}
+            fresh = [row for row in rebased if _manifest_key(row) not in seen]
+
+            fh.seek(0, os.SEEK_END)
+            writer = csv.DictWriter(
+                fh, fieldnames=list(MANIFEST_COLUMNS), extrasaction="ignore"
+            )
+            if header is None:
+                writer.writeheader()
+            writer.writerows(fresh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    return len(fresh)
+
+
 @dataclass
 class SlideResult:
     """What happened to one slide, for the batch summary."""
@@ -1508,6 +1803,18 @@ class SlideResult:
     written: int = 0
     slide_dir: str | None = None
     reason: str | None = None
+    dry_run: bool = False
+    # Tiles per (label, OMERO ROI id), after sampling.
+    roi_counts: Counter = field(default_factory=Counter)
+    # Selected ROIs on the slide, and those --erode shrank to nothing.
+    roi_total: int = 0
+    lost_rois: list[tuple[str, int | None]] = field(default_factory=list)
+    # Tiles per label before the per-label / per-slide caps.
+    available: Counter = field(default_factory=Counter)
+    reused: int = 0
+    # The --erode inset actually applied, in micrometres (0 = off; None when
+    # the image has no pixel size to convert with).
+    erode_um: float | None = None
 
 
 def image_pixel_sizes(image) -> tuple[float | None, float | None]:
@@ -1629,6 +1936,40 @@ def _load_thumbnail_network(conn, image, analysis_ds: int) -> np.ndarray:
     return _vips_to_numpy(generate_over_network(conn, image, analysis_ds))
 
 
+def erode_radius_px(
+    params: TileParams,
+    tile0: int,
+    analysis_ds: int,
+    pixel_size_x: float | None,
+) -> float:
+    """Convert ``--erode`` into an erosion radius in analysis pixels.
+
+    :param params: the run's settings
+    :type params: TileParams
+    :param tile0: tile edge in level-0 pixels
+    :type tile0: int
+    :param analysis_ds: the thumbnail's downsample factor
+    :type analysis_ds: int
+    :param pixel_size_x: physical pixel size, or None
+    :type pixel_size_x: float | None
+    :return: the radius (0 means no erosion)
+    :rtype: float
+    """
+    half_tile = (tile0 / 2) / analysis_ds
+    if params.erode_um is None:
+        return half_tile
+    if params.erode_um <= 0:
+        return 0.0
+    if not pixel_size_x:
+        log.warning(
+            "No physical pixel size recorded, so --erode %.1f um cannot be converted "
+            "to pixels; eroding by half a tile instead.",
+            params.erode_um,
+        )
+        return half_tile
+    return params.erode_um / (pixel_size_x * analysis_ds)
+
+
 def analyze_slide(
     tiles: Sequence[GridTile],
     thumbnail: np.ndarray,
@@ -1638,13 +1979,14 @@ def analyze_slide(
     *,
     lookup: dict[str, str] | None = None,
     pixel_size_x: float | None = None,
+    details: dict | None = None,
 ) -> tuple[list[TileRecord], Counter, bool]:
     """Decide every tile's fate at analysis resolution.
 
     All the per-slide thinking happens here, on a thumbnail: tissue, ROI
-    coverage, exclusions and the background rule. No full-resolution pixel
-    is touched, which is the only reason tiling a 220k x 260k slide is
-    tractable.
+    coverage, ROI erosion, exclusions and the background rule. No
+    full-resolution pixel is touched, which is the only reason tiling a
+    220k x 260k slide is tractable.
 
     :param tiles: the grid
     :type tiles: Sequence[GridTile]
@@ -1659,14 +2001,24 @@ def analyze_slide(
     :type params: TileParams
     :param lookup: a prebuilt alias lookup, or None to load one
     :type lookup: dict[str, str] | None
-    :param pixel_size_x: physical pixel size, for the background margin
+    :param pixel_size_x: physical pixel size, for the background margin and
+        ``--erode``
     :type pixel_size_x: float | None
+    :param details: if given, filled with ``selected_shapes`` (shape id ->
+        class, for every annotation this run labels from), ``lost_shapes``
+        (the subset ``--erode`` shrank to nothing) and ``erode_px``
+    :type details: dict | None
     :return: ``(records, stats, has_rois)``
     :rtype: tuple[list[TileRecord], collections.Counter, bool]
     """
     shape_list = list(shapes or [])
     has_rois = bool(shape_list)
     thumb_hw = (int(thumbnail.shape[0]), int(thumbnail.shape[1]))
+    if details is None:
+        details = {}
+    details.setdefault("selected_shapes", {})
+    details.setdefault("lost_shapes", {})
+    details.setdefault("erode_px", 0.0)
 
     xs, ys, ws, hs = tile_windows(tiles, analysis_ds)
     tissue_fracs = window_fractions(
@@ -1701,10 +2053,11 @@ def analyze_slide(
         lookup = build_alias_lookup(load_label_map(params.labels))
 
     warned: set[str] = set()
-    label_masks: dict[str, np.ndarray] = {}
-    for text, mask in masks.items():
+
+    def resolve(text: str | None) -> str | None:
+        """The class a textValue labels tiles as in this run, or None."""
         if text is not None and text.strip().lower() in exclude_set:
-            continue
+            return None
         # Always resolve to a folder, so a -t value naming a textValue the
         # label map has never heard of still selects it; the unmapped
         # warning is only interesting in --all mode, where nobody asked
@@ -1716,28 +2069,65 @@ def analyze_slide(
             warned=warned if params.include_all else None,
         )
         if folder is None:
-            continue
+            return None
         if not params.include_all and not selects_label(
             folder, text, params.text_filter
         ):
+            return None
+        return folder
+
+    label_masks: dict[str, np.ndarray] = {}
+    for text, mask in masks.items():
+        folder = resolve(text)
+        if folder is None:
             continue
         existing = label_masks.get(folder)
         label_masks[folder] = mask.copy() if existing is None else (existing | mask)
 
+    selected_shapes: dict[int, str] = {}
+    for shape_id, _rgb, text, _points in shape_list:
+        folder = resolve(text)
+        if folder is not None:
+            selected_shapes[int(shape_id)] = folder
+    details["selected_shapes"] = selected_shapes
+
+    label_integs = {name: integral_image(mask) for name, mask in label_masks.items()}
     label_fracs = {
-        name: window_fractions(integral_image(mask), xs, ys, ws, hs)
-        for name, mask in label_masks.items()
+        name: window_fractions(integ, xs, ys, ws, hs)
+        for name, integ in label_integs.items()
     }
+
+    # --erode: a tile may only take a class if its centre lies in that
+    # class's ROI shrunk by the radius. Eroding the per-class union (not each
+    # shape alone) keeps two touching same-class annotations from growing a
+    # false boundary between them.
+    center_ok: dict[str, np.ndarray] | None = None
+    tile0 = tiles[0].w0 if tiles else 0
+    radius = erode_radius_px(params, tile0, analysis_ds, pixel_size_x)
+    details["erode_px"] = radius
+    if radius >= 1 and label_masks:
+        boxes = center_boxes(tiles, analysis_ds, radius)
+        center_ok = {}
+        lost: dict[int, str] = {}
+        for name, mask in label_masks.items():
+            center_ok[name] = window_fractions(label_integs[name], *boxes) >= 1.0 - 1e-9
+            eroded = erode_mask(mask, radius)
+            ours = {sid for sid, folder in selected_shapes.items() if folder == name}
+            before = ours.intersection(np.unique(shape_ids[mask]).tolist())
+            after = ours.intersection(np.unique(shape_ids[eroded]).tolist())
+            for sid in before - after:
+                lost[sid] = name
+        details["lost_shapes"] = lost
 
     background_fracs = None
     if params.background_label and has_rois:
         union = np.zeros(thumb_hw, dtype=bool)
         for mask in masks.values():
             union |= mask
-        radius = 0.0
+        margin = 0.0
         if params.background_margin_um > 0:
             if pixel_size_x:
-                radius = params.background_margin_um / (pixel_size_x * analysis_ds)
+                margin = params.background_margin_um / (pixel_size_x * analysis_ds)
             else:
                 log.warning(
                     "No physical pixel size recorded, so --background-margin %.1f um "
@@ -1746,10 +2136,10 @@ def analyze_slide(
                     params.background_margin_um,
                 )
         background_fracs = window_fractions(
-            integral_image(dilate_mask(union, radius)), xs, ys, ws, hs
+            integral_image(dilate_mask(union, margin)), xs, ys, ws, hs
         )
 
-    def roi_id_for(index: int) -> int | None:
+    def shape_id_for(index: int) -> int | None:
         return _dominant_shape_id(
             shape_ids, int(xs[index]), int(ys[index]), int(ws[index]), int(hs[index])
         )
@@ -1760,7 +2150,8 @@ def analyze_slide(
         label_fracs,
         exclude_fracs=exclude_fracs,
         background_fracs=background_fracs,
-        roi_id_for=roi_id_for,
+        shape_id_for=shape_id_for,
+        center_ok=center_ok,
         min_coverage=params.min_coverage,
         tissue_thresh=params.tissue_thresh,
         background_label=params.background_label,
@@ -1769,25 +2160,58 @@ def analyze_slide(
     return records, stats, has_rois
 
 
+def group_rois(
+    shape_ids: Iterable[int], shape_rois: dict[int, int]
+) -> dict[int | None, set[int]]:
+    """Group shape ids by the OMERO ROI holding them.
+
+    :param shape_ids: the shapes
+    :type shape_ids: Iterable[int]
+    :param shape_rois: shape id -> ROI id, from ``lavlab.roi.shape_roi_ids``
+    :type shape_rois: dict[int, int]
+    :return: ROI id -> its shapes; a shape of unknown ROI is its own group,
+        keyed by its negated shape id so it cannot collide with a real ROI
+    :rtype: dict[int | None, set[int]]
+    """
+    groups: dict[int | None, set[int]] = {}
+    for sid in shape_ids:
+        key = shape_rois.get(sid, -sid)
+        groups.setdefault(key, set()).add(sid)
+    return groups
+
+
 def _manifest_row(
-    image_id, subject, slide_stem, record, path, plan, params, mpp_effective, tier
+    image_id,
+    subject,
+    slide_stem,
+    record,
+    path,
+    plan,
+    params,
+    mpp_effective,
+    tier,
+    roi_id,
 ) -> dict:
+    x, y = tile_center(record.tile)
     return {
-        "image_id": image_id,
-        "subject": subject,
-        "slide_stem": slide_stem,
+        "tile_path": path,
+        "omero_image_id": image_id,
+        "case_id": subject,
+        "slide_id": slide_stem,
+        "roi_id": "" if roi_id is None else roi_id,
         "label": record.label,
-        "path": path,
+        "x": x,
+        "y": y,
+        "mpp": "" if mpp_effective is None else round(mpp_effective, 6),
+        "size": params.size,
+        "shape_id": "" if record.shape_id is None else record.shape_id,
         "x0": record.tile.x0,
         "y0": record.tile.y0,
         "w0": record.tile.w0,
         "h0": record.tile.h0,
         "level": plan.index,
-        "mpp": "" if mpp_effective is None else round(mpp_effective, 6),
-        "size": params.size,
         "coverage": round(record.coverage, 6),
         "tissue_frac": round(record.tissue_frac, 6),
-        "roi_id": "" if record.roi_id is None else record.roi_id,
         "tier": tier,
     }
 
@@ -1801,6 +2225,9 @@ def tile_slide(
     override: bool = False,
     skip_existing: bool = False,
     force_local: bool = False,
+    manifest_path: str | None = None,
+    dry_run: bool = False,
+    store_count: int | None = None,
 ) -> SlideResult:
     """Tile one slide into ``<out_root>/<subject>/<stem>/``.
 
@@ -1812,10 +2239,18 @@ def tile_slide(
     :type out_root: str
     :param override: re-tile a slide whose recorded parameters differ
     :type override: bool
-    :param skip_existing: skip slides that already look finished
+    :param skip_existing: skip slides that already look finished, and resume
+        an interrupted slide from the tiles it already wrote
     :type skip_existing: bool
     :param force_local: read a JPEG-2000 source locally anyway
     :type force_local: bool
+    :param manifest_path: also append this slide's rows to a combined
+        cross-run manifest
+    :type manifest_path: str | None
+    :param dry_run: decide and count every tile, but read and write nothing
+    :type dry_run: bool
+    :param store_count: parallel raw-pixels stores for network reads
+    :type store_count: int | None
     :return: what happened
     :rtype: SlideResult
     :raises TilingError: for a slide that cannot be tiled as asked
@@ -1826,12 +2261,14 @@ def tile_slide(
     subject = subject_dir_name(name)
     slide_dir = os.path.join(out_root, subject, slide_stem)
 
-    if skip_existing and slide_is_complete(slide_dir):
+    if skip_existing and not dry_run and slide_is_complete(slide_dir):
         saved = read_tile_params(slide_dir)
         if params_match(saved, params):
             log.info(
                 "Image %d: already tiled with these parameters, skipping.", image_id
             )
+            if manifest_path:
+                append_manifest(manifest_path, read_manifest(slide_dir), out_root)
             return SlideResult(
                 image_id,
                 "skipped",
@@ -1850,15 +2287,34 @@ def tile_slide(
                 image_id, "skipped", slide_dir=slide_dir, reason="parameter mismatch"
             )
 
+    # An interrupted run records its parameters up front but never gets as far
+    # as the manifest; with the same parameters, its finished tiles are reused.
+    resume = (
+        skip_existing
+        and not dry_run
+        and not params.coords_only
+        and not slide_is_complete(slide_dir)
+        and params_match(read_tile_params(slide_dir), params)
+    )
+
     width0 = int(image.getSizeX())
     height0 = int(image.getSizeY())
     pixel_x, pixel_y = image_pixel_sizes(image)
-    ds_total = resolve_total_downsample(
-        mpp=params.mpp,
-        downsample=params.downsample,
-        pixel_size_x=pixel_x,
-        pixel_size_y=pixel_y,
-    )
+    scale_ds: list[tuple[float | None, float]] = []
+    for mpp_s in params.output_mpps():
+        scale_ds.append(
+            (
+                mpp_s,
+                resolve_total_downsample(
+                    mpp=mpp_s,
+                    downsample=params.downsample,
+                    pixel_size_x=pixel_x,
+                    pixel_size_y=pixel_y,
+                ),
+            )
+        )
+    ds_total = scale_ds[0][1]
+    multi_scale = len(scale_ds) > 1
 
     tiles = build_grid(width0, height0, params.size, params.overlap, ds_total)
     if not tiles:
@@ -1871,7 +2327,11 @@ def tile_slide(
             params.size,
         )
         return SlideResult(
-            image_id, "done", slide_dir=slide_dir, reason="slide smaller than one tile"
+            image_id,
+            "done",
+            slide_dir=slide_dir,
+            reason="slide smaller than one tile",
+            dry_run=dry_run,
         )
 
     analysis_ds = analysis_downsample(tiles[0].w0)
@@ -1902,7 +2362,9 @@ def tile_slide(
         level_dims = network_level_dims(conn, image)
         thumbnail = _load_thumbnail_network(conn, image, analysis_ds)
 
-    plan = select_level([w for w, _h in level_dims], width0, ds_total, params.size)
+    level_widths = [w for w, _h in level_dims]
+    plans = [select_level(level_widths, width0, ds, params.size) for _m, ds in scale_ds]
+    plan = plans[0]
     log.info(
         "Image %d: %d grid tiles, tier %s, pyramid level %d (x%.2f), analysis 1/%d.",
         image_id,
@@ -1913,7 +2375,7 @@ def tile_slide(
         analysis_ds,
     )
 
-    from lavlab.roi import get_shapes_as_points
+    from lavlab.roi import get_shapes_as_points, shape_roi_ids
 
     shapes = (
         get_shapes_as_points(image, img_downsample=analysis_ds, include_all=True) or []
@@ -1926,9 +2388,17 @@ def tile_slide(
             image_id,
         )
         return SlideResult(
-            image_id, "unannotated", tier=tier, slide_dir=slide_dir, reason="no ROIs"
+            image_id,
+            "unannotated",
+            tier=tier,
+            slide_dir=slide_dir,
+            reason="no ROIs",
+            dry_run=dry_run,
         )
 
+    shape_rois = shape_roi_ids(image) if params.mode == "roi" else {}
+
+    details: dict = {}
     records, stats, _has_rois = analyze_slide(
         tiles,
         thumbnail,
@@ -1936,9 +2406,26 @@ def tile_slide(
         analysis_ds,
         params,
         pixel_size_x=pixel_x,
+        details=details,
     )
     del thumbnail
 
+    if multi_scale:
+        # Every scale is cut around the same centre, so a centre near the
+        # slide edge can fit at the finest scale and run off at a coarser one.
+        # Drop it rather than pad: a padded context crop is not real context.
+        fitting = []
+        for record in records:
+            if all(
+                tile_fits(scale_tile(record.tile, ds, params.size), width0, height0)
+                for _m, ds in scale_ds[1:]
+            ):
+                fitting.append(record)
+            else:
+                stats["dropped_scale_edge"] += 1
+        records = fitting
+
+    available = Counter(r.label for r in records)
     records = sample_records(
         records,
         max_tiles=params.max_tiles,
@@ -1955,78 +2442,211 @@ def tile_slide(
             stats["dropped_excluded"],
         )
 
-    mpp_effective = params.mpp
-    if mpp_effective is None and pixel_x:
-        mpp_effective = pixel_x * ds_total
+    # Report ROIs, not shapes: that is the unit annotators think in and the
+    # unit a dataset is split by.
+    selected = details["selected_shapes"]
+    lost_shapes = details["lost_shapes"]
+    roi_groups = group_rois(selected, shape_rois)
+    lost_rois = sorted(
+        (
+            (selected[next(iter(sids))], roi_id if roi_id >= 0 else None)
+            for roi_id, sids in roi_groups.items()
+            if sids and all(sid in lost_shapes for sid in sids)
+        ),
+        key=lambda item: (item[0], item[1] or 0),
+    )
+    if lost_rois:
+        log.info(
+            "Image %d: --erode (%.1f analysis px) left %d of %d ROIs with no room "
+            "for a tile centre -- they are smaller than about one tile: %s",
+            image_id,
+            details["erode_px"],
+            len(lost_rois),
+            len(roi_groups),
+            ", ".join(f"{label}:{rid}" for label, rid in lost_rois),
+        )
+
+    roi_counts: Counter = Counter()
+    for record in records:
+        if record.shape_id is not None:
+            roi_counts[(record.label, shape_rois.get(record.shape_id))] += 1
+    # List every selected ROI, including the ones that produced nothing --
+    # those are the ones worth seeing in a --dry-run.
+    for roi_key, sids in roi_groups.items():
+        label = selected[next(iter(sids))]
+        roi_counts.setdefault((label, roi_key if roi_key >= 0 else None), 0)
+    label_counts = Counter(r.label for r in records)
+
+    erode_um = (
+        details["erode_px"] * analysis_ds * pixel_x
+        if pixel_x
+        else (0.0 if not details["erode_px"] else None)
+    )
+
+    def mpp_effective(mpp_s: float | None, ds_s: float) -> float | None:
+        if mpp_s is not None:
+            return mpp_s
+        return pixel_x * ds_s if pixel_x else None
+
+    common = {
+        "tier": tier,
+        "label_counts": label_counts,
+        "stats": stats,
+        "slide_dir": slide_dir,
+        "roi_counts": roi_counts,
+        "roi_total": len(roi_groups),
+        "lost_rois": lost_rois,
+        "available": available,
+        "erode_um": erode_um,
+    }
+
+    if dry_run:
+        log.info(
+            "Image %d: dry run -- would write %d tile location(s) x %d scale(s) (%s).",
+            image_id,
+            len(records),
+            len(scale_ds),
+            ", ".join(f"{k}={v}" for k, v in sorted(label_counts.items())) or "none",
+        )
+        return SlideResult(image_id, "done", dry_run=True, **common)
 
     os.makedirs(slide_dir, exist_ok=True)
-    rows: list[dict] = []
-    label_counts: Counter = Counter()
-    written = 0
+    # This directory is about to be rewritten: a manifest left over from an
+    # earlier run must not make a half-finished new one look complete.
+    stale_manifest = os.path.join(slide_dir, MANIFEST_NAME)
+    if os.path.exists(stale_manifest):
+        os.remove(stale_manifest)
+    identity = {"image_id": image_id, "subject": subject, "slide_stem": slide_stem}
+    if not params.coords_only:
+        write_params(slide_dir, params, status="in_progress", **identity)
 
-    if params.coords_only:
-        for record in records:
-            rows.append(
-                _manifest_row(
-                    image_id,
-                    subject,
-                    slide_stem,
-                    record,
-                    "",
-                    plan,
-                    params,
-                    mpp_effective,
-                    tier,
-                )
+    rows: list[dict] = []
+    written = 0
+    reused = 0
+
+    for scale_index, (mpp_s, ds_s) in enumerate(scale_ds):
+        scale_plan = plans[scale_index]
+        mpp_out = mpp_effective(mpp_s, ds_s)
+        scaled = (
+            list(records)
+            if scale_index == 0
+            else [
+                replace(r, tile=scale_tile(r.tile, ds_s, params.size)) for r in records
+            ]
+        )
+
+        def row_for(record, path, _plan=scale_plan, _mpp=mpp_out):
+            return _manifest_row(
+                image_id,
+                subject,
+                slide_stem,
+                record,
+                path,
+                _plan,
+                params,
+                _mpp,
+                tier,
+                shape_rois.get(record.shape_id)
+                if record.shape_id is not None
+                else None,
             )
-            label_counts[record.label] += 1
-    else:
-        if tier == "local":
-            reader = LocalRegionReader(src_path, plan, level_dims[plan.index])
-        else:
-            reader = NetworkRegionReader(conn, image, plan)
-        try:
-            for record, pixels in cut_tiles(reader, records, params.size):
-                label_dir = os.path.join(slide_dir, record.label)
-                os.makedirs(label_dir, exist_ok=True)
-                tile_path = os.path.join(
-                    label_dir, tile_filename(slide_stem, record, params.fmt)
+
+        if params.coords_only:
+            rows.extend(row_for(record, "") for record in scaled)
+            continue
+
+        scale_rows: list[dict | None] = [None] * len(scaled)
+        todo: list[tuple[int, TileRecord, str]] = []
+        for index, record in enumerate(scaled):
+            label_dir = os.path.join(slide_dir, record.label)
+            if multi_scale:
+                filename = scaled_tile_filename(
+                    slide_stem, tile_center(record.tile), mpp_s, params.fmt
                 )
-                write_tile(pixels, tile_path)
-                rows.append(
-                    _manifest_row(
-                        image_id,
-                        subject,
-                        slide_stem,
-                        record,
-                        os.path.relpath(tile_path, out_root),
-                        plan,
-                        params,
-                        mpp_effective,
-                        tier,
+            else:
+                filename = tile_filename(slide_stem, record, params.fmt)
+            tile_path = os.path.join(label_dir, filename)
+            if resume and os.path.isfile(tile_path):
+                scale_rows[index] = row_for(
+                    record, os.path.relpath(tile_path, out_root)
+                )
+                reused += 1
+            else:
+                todo.append((index, record, tile_path))
+
+        if todo:
+            if tier == "local":
+                reader = LocalRegionReader(
+                    src_path, scale_plan, level_dims[scale_plan.index]
+                )
+            elif store_count:
+                reader = NetworkRegionReader(
+                    conn, image, scale_plan, store_count=store_count
+                )
+            else:
+                reader = NetworkRegionReader(conn, image, scale_plan)
+            try:
+                cut = cut_tiles(
+                    reader, [record for _i, record, _p in todo], params.size
+                )
+                for (index, record, tile_path), (_rec, pixels) in zip(
+                    todo, cut, strict=True
+                ):
+                    os.makedirs(os.path.dirname(tile_path), exist_ok=True)
+                    row = row_for(record, os.path.relpath(tile_path, out_root))
+                    metadata = {
+                        key: row[key]
+                        for key in (
+                            "omero_image_id",
+                            "case_id",
+                            "slide_id",
+                            "roi_id",
+                            "shape_id",
+                            "label",
+                            "x",
+                            "y",
+                            "mpp",
+                            "size",
+                        )
+                    }
+                    metadata["lavlab_version"] = __version__
+                    write_tile(
+                        pixels, tile_path, metadata=metadata, quality=params.quality
                     )
-                )
-                label_counts[record.label] += 1
-                written += 1
-        finally:
-            reader.close()
+                    scale_rows[index] = row
+                    written += 1
+            finally:
+                reader.close()
+
+        rows.extend(row for row in scale_rows if row is not None)
 
     write_manifest(slide_dir, rows)
     write_params(
         slide_dir,
         params,
-        image_id=image_id,
-        subject=subject,
-        slide_stem=slide_stem,
+        status="complete",
+        **identity,
         tier=tier,
         level=plan.index,
+        levels={
+            str(mpp_s): p.index for (mpp_s, _ds), p in zip(scale_ds, plans, strict=True)
+        },
         total_downsample=round(ds_total, 6),
         analysis_downsample=analysis_ds,
         grid_tiles=len(tiles),
         label_counts=dict(sorted(label_counts.items())),
         drop_stats={k: v for k, v in sorted(stats.items()) if k.startswith("dropped_")},
+        rois_total=len(roi_groups),
+        rois_lost_to_erosion=len(lost_rois),
+        erode_um_effective=None if erode_um is None else round(erode_um, 3),
     )
+    if manifest_path:
+        append_manifest(manifest_path, rows, out_root)
 
+    if reused:
+        log.info(
+            "Image %d: resumed -- reused %d tiles already on disk.", image_id, reused
+        )
     log.info(
         "Image %d: wrote %d tiles to '%s' (%s).",
         image_id,
@@ -2034,12 +2654,4 @@ def tile_slide(
         slide_dir,
         ", ".join(f"{k}={v}" for k, v in sorted(label_counts.items())) or "none",
     )
-    return SlideResult(
-        image_id,
-        "done",
-        tier=tier,
-        label_counts=label_counts,
-        stats=stats,
-        written=written,
-        slide_dir=slide_dir,
-    )
+    return SlideResult(image_id, "done", written=written, reused=reused, **common)

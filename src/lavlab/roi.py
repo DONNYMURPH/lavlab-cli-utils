@@ -236,6 +236,21 @@ def get_rois(img, roi_service=None):
     return rois
 
 
+def shape_roi_ids(img, roi_service=None) -> dict[int, int]:
+    """Map every shape id on an image to the id of the ROI that holds it.
+
+    ``get_shapes_as_points`` reports shape ids; a QuPath import usually has
+    one shape per ROI, but OMERO allows several, and datasets are grouped by
+    ROI.
+    """
+    mapping: dict[int, int] = {}
+    for roi in get_rois(img, roi_service):
+        roi_id = roi.getId()._val
+        for shape in roi.copyShapes():
+            mapping[shape.getId()._val] = roi_id
+    return mapping
+
+
 def get_shapes_as_points(
     img,
     point_downsample: int = 4,

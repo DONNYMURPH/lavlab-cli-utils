@@ -11,6 +11,8 @@ skipped rather than failed when omero-py isn't installed.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import subprocess
@@ -450,11 +452,11 @@ def test_assign_labels_records_the_covering_roi_id():
         tiles,
         np.ones(1),
         {"G3": np.array([1.0])},
-        roi_id_for=lambda index: 4242,
+        shape_id_for=lambda index: 4242,
         min_coverage=0.5,
     )
 
-    assert records[0].roi_id == 4242
+    assert records[0].shape_id == 4242
 
 
 # --- the benign / background rule ------------------------------------------
@@ -602,8 +604,8 @@ def test_analyze_slide_labels_roi_margin_and_background():
     assert (0, 0) not in labels
     # a classed tile carries the ROI that covered it; background carries none
     graded = [r for r in records if r.label == "G3"]
-    assert {r.roi_id for r in graded} == {7}
-    assert all(r.roi_id is None for r in records if r.label == "benign")
+    assert {r.shape_id for r in graded} == {7}
+    assert all(r.shape_id is None for r in records if r.label == "benign")
 
 
 def test_analyze_slide_reports_no_rois_so_the_caller_can_skip():
@@ -782,11 +784,13 @@ def _row(**kw):
 
 
 def test_write_manifest_writes_every_column(tmp_path):
-    path = write_manifest(str(tmp_path), [_row(image_id=1, label="G3", x0=10, y0=20)])
+    path = write_manifest(
+        str(tmp_path), [_row(tile_path="a.png", omero_image_id=1, label="G3", x=10)]
+    )
 
     contents = open(path).read().splitlines()
     assert contents[0] == ",".join(tiling.MANIFEST_COLUMNS)
-    assert contents[1].startswith("1,,,G3,,10,20")
+    assert contents[1].startswith("a.png,1,,,,G3,10,")
 
 
 def test_write_manifest_is_atomic_and_leaves_nothing_behind_on_failure(tmp_path):
@@ -1171,6 +1175,12 @@ def mocked_slide(monkeypatch, tmp_path):
 
     _shapes.value = [_shape(7, _square_ring(16, 16, 32, 32), "g3")]
     monkeypatch.setattr(roi_module, "get_shapes_as_points", _shapes)
+    # shape 7 belongs to OMERO ROI 70
+    monkeypatch.setattr(
+        roi_module,
+        "shape_roi_ids",
+        lambda image: {sid: sid * 10 for sid, *_rest in _shapes.value},
+    )
     return _shapes
 
 
@@ -1192,13 +1202,21 @@ def test_tile_slide_writes_tiles_manifest_and_params(mocked_slide, tmp_path):
 
     manifest = (slide_dir / tiling.MANIFEST_NAME).read_text().splitlines()
     assert manifest[0] == ",".join(tiling.MANIFEST_COLUMNS)
-    first = dict(zip(tiling.MANIFEST_COLUMNS, manifest[1].split(",")))
-    assert first["subject"] == "N101"
-    assert first["slide_stem"] == "N101_S08_HE"
+    rows = list(csv.DictReader(io.StringIO("\n".join(manifest))))
+    first = rows[0]
+    assert first["case_id"] == "N101"
+    assert first["slide_id"] == "N101_S08_HE"
+    assert first["omero_image_id"] == "1"
     assert first["tier"] == "local"
     # path is relative to the output root, not absolute
-    assert not os.path.isabs(first["path"])
-    assert (out / first["path"]).is_file()
+    assert not os.path.isabs(first["tile_path"])
+    assert (out / first["tile_path"]).is_file()
+    # a graded tile carries the real OMERO ROI id and the shape id
+    graded = next(r for r in rows if r["label"] == "G3")
+    assert graded["roi_id"] == "70"
+    assert graded["shape_id"] == "7"
+    # x/y are the tile centre
+    assert int(graded["x"]) == int(graded["x0"]) + int(graded["w0"]) // 2
 
 
 @needs_omero
@@ -1248,7 +1266,8 @@ def test_tile_slide_coords_only_writes_no_images(mocked_slide, tmp_path):
     rows = (slide_dir / tiling.MANIFEST_NAME).read_text().splitlines()[1:]
     assert rows
     assert all(
-        dict(zip(tiling.MANIFEST_COLUMNS, r.split(",")))["path"] == "" for r in rows
+        dict(zip(tiling.MANIFEST_COLUMNS, r.split(",")))["tile_path"] == ""
+        for r in rows
     )
 
 
@@ -1644,3 +1663,564 @@ def test_dilate_mask_falls_back_without_isotropic_dilation(monkeypatch):
 
     monkeypatch.delattr(morphology, "isotropic_dilation", raising=False)
     assert np.array_equal(tiling.dilate_mask(mask, 3.0), expected)
+
+
+# ---------------------------------------------------------------------------
+# --erode: tile centres only inside the shrunken ROI
+# ---------------------------------------------------------------------------
+
+
+def test_center_boxes_at_half_a_tile_are_the_tiles_own_windows():
+    tiles = build_grid(80, 80, size=8, overlap=0, ds_total=1.0)
+
+    boxes = tiling.center_boxes(tiles, analysis_ds=1, radius_px=4.0)
+
+    assert all(np.array_equal(b, w) for b, w in zip(boxes, tile_windows(tiles, 1)))
+
+
+def test_erosion_keeps_flush_tiles_on_every_side_and_nothing_poking_out():
+    """Symmetric: a tile flush against any ROI edge passes, one 1 px out fails."""
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[16:32, 16:32] = True
+    integ = integral_image(mask)
+    tiles = [
+        GridTile(0, 0, 0, 0, 16, 16, 8, 8),  # flush top-left
+        GridTile(0, 0, 0, 0, 24, 24, 8, 8),  # flush bottom-right
+        GridTile(0, 0, 0, 0, 15, 16, 8, 8),  # 1 px out on the left
+        GridTile(0, 0, 0, 0, 25, 24, 8, 8),  # 1 px out on the right
+    ]
+
+    inside = window_fractions(integ, *tiling.center_boxes(tiles, 1, 4.0)) >= 1.0
+
+    assert inside.tolist() == [True, True, False, False]
+
+
+def test_erode_mask_finds_room_only_where_a_tile_fits():
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[16:32, 16:32] = True  # 16 px: room for an 8 px square
+    mask[2:7, 2:7] = True  # 5 px: no room
+
+    eroded = tiling.erode_mask(mask, 4.0)
+
+    assert eroded[16:32, 16:32].any()
+    assert not eroded[0:10, 0:10].any()
+
+
+def test_erode_mask_is_a_no_op_under_one_pixel():
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[2:6, 2:6] = True
+
+    assert tiling.erode_mask(mask, 0.0) is mask
+    assert tiling.erode_mask(mask, 0.5) is mask
+
+
+def _edge_case_analysis(**params):
+    # ROI [16, 36) x [16, 32): column 4 (x 32..40) is half inside it.
+    tiles = build_grid(80, 80, size=8, overlap=0, ds_total=1.0)
+    shapes = [_shape(7, _square_ring(16, 16, 36, 32), "g3")]
+    details = {}
+    records, stats, _ = analyze_slide(
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=_analysis_params(min_coverage=0.4, **params),
+        lookup=build_alias_lookup({"G3": ["g3"]}),
+        pixel_size_x=1.0,
+        details=details,
+    )
+    return _labels_by_cell(records), stats, details
+
+
+def test_erosion_drops_a_tile_that_only_straddles_the_roi():
+    labels, stats, details = _edge_case_analysis()
+
+    assert labels[(2, 2)] == "G3"  # wholly inside
+    assert (2, 4) not in labels  # half inside: enough coverage, centre outside
+    assert stats["dropped_roi_edge"] >= 1
+    assert details["erode_px"] == 4.0  # auto = half an 8 px tile
+
+
+def test_erode_zero_restores_coverage_only_labelling():
+    labels, stats, _ = _edge_case_analysis(erode_um=0.0)
+
+    assert labels[(2, 4)] == "G3"
+    assert stats["dropped_roi_edge"] == 0
+
+
+def test_erode_in_micrometres_uses_the_pixel_size():
+    # 2 um at 1 um/px = 2 px: the half-inside tile's centre (x=36) is on the
+    # edge pixel, which is outside the ROI whatever the radius.
+    labels, _stats, details = _edge_case_analysis(erode_um=2.0)
+
+    assert details["erode_px"] == 2.0
+    assert (2, 4) not in labels
+
+
+def test_erosion_reports_rois_too_small_for_a_tile():
+    tiles = build_grid(80, 80, size=8, overlap=0, ds_total=1.0)
+    shapes = [
+        _shape(7, _square_ring(16, 16, 40, 40), "g3"),  # big: survives
+        _shape(8, _square_ring(50, 50, 55, 55), "g3"),  # 5 px: smaller than a tile
+    ]
+    details = {}
+
+    analyze_slide(
+        tiles,
+        _analysis_thumbnail(),
+        shapes,
+        analysis_ds=1,
+        params=_analysis_params(),
+        lookup=build_alias_lookup({"G3": ["g3"]}),
+        pixel_size_x=1.0,
+        details=details,
+    )
+
+    assert details["selected_shapes"] == {7: "G3", 8: "G3"}
+    assert details["lost_shapes"] == {8: "G3"}
+
+
+def test_group_rois_groups_shapes_by_their_omero_roi():
+    groups = tiling.group_rois([1, 2, 3], {1: 100, 2: 100})
+
+    assert groups[100] == {1, 2}
+    assert groups[-3] == {3}  # unknown ROI: its own group
+
+
+# ---------------------------------------------------------------------------
+# tile_slide: dry run, scales, metadata, combined manifest, resume
+# ---------------------------------------------------------------------------
+
+
+@needs_omero
+def test_dry_run_counts_everything_and_writes_nothing(mocked_slide, tmp_path):
+    out = tmp_path / "out"
+
+    result = tiling.tile_slide(
+        None,
+        _FakeImage(),
+        _analysis_params(max_background_tiles=3),
+        str(out),
+        dry_run=True,
+        manifest_path=str(tmp_path / "dataset.csv"),
+    )
+
+    assert result.dry_run is True
+    assert result.status == "done"
+    assert not out.exists()
+    assert not (tmp_path / "dataset.csv").exists()
+    assert result.label_counts["G3"] > 0
+    assert result.label_counts["benign"] == 3
+    assert result.available["benign"] > 3  # before the cap
+    assert result.roi_total == 1
+    assert result.roi_counts[("G3", 70)] == result.label_counts["G3"]
+
+
+@needs_omero
+def test_dry_run_lists_an_roi_that_erosion_empties(mocked_slide, tmp_path):
+    mocked_slide.value = [
+        _shape(7, _square_ring(16, 16, 32, 32), "g3"),
+        _shape(8, _square_ring(50, 50, 54, 54), "g5"),
+    ]
+
+    result = tiling.tile_slide(
+        None, _FakeImage(), _analysis_params(), str(tmp_path / "out"), dry_run=True
+    )
+
+    assert result.roi_total == 2
+    assert result.lost_rois == [("G5", 80)]
+    assert result.roi_counts[("G5", 80)] == 0
+
+
+@needs_omero
+def test_scales_write_concentric_pairs(mocked_slide, tmp_path):
+    out = tmp_path / "out"
+    params = _analysis_params(scales=[1.0, 2.0], background_label=None)
+
+    result = tiling.tile_slide(None, _FakeImage(), params, str(out))
+
+    rows = list(
+        csv.DictReader(open(out / "N101" / "N101_S08_HE" / tiling.MANIFEST_NAME))
+    )
+    by_scale = {}
+    for row in rows:
+        by_scale.setdefault(row["mpp"], []).append(row)
+    assert set(by_scale) == {"1.0", "2.0"}
+    fine = {(r["x"], r["y"]) for r in by_scale["1.0"]}
+    coarse = {(r["x"], r["y"]) for r in by_scale["2.0"]}
+    assert fine == coarse  # same centres at both scales
+    assert result.written == len(rows) == 2 * sum(result.label_counts.values())
+    sample = by_scale["2.0"][0]
+    assert sample["tile_path"].endswith(f"_x{sample['x']}_y{sample['y']}_mpp2.0.png")
+    assert int(sample["w0"]) == 16  # 8 px at 2 um/px on a 1 um/px slide
+    assert (out / sample["tile_path"]).is_file()
+
+
+def test_output_mpps_lists_the_finest_scale_first():
+    assert TileParams(mpp=0.5).output_mpps() == [0.5]
+    assert TileParams(mpp=0.5, scales=[1.0, 0.5]).output_mpps() == [0.5, 1.0]
+    assert TileParams(mpp=None, downsample=4.0).output_mpps() == [None]
+
+
+def test_scale_tile_is_concentric():
+    tile = GridTile(0, 0, 0, 0, 100, 200, 64, 64)
+
+    bigger = tiling.scale_tile(tile, ds_total=2.0, size=64)
+
+    assert tiling.tile_center(bigger) == tiling.tile_center(tile)
+    assert (bigger.w0, bigger.h0) == (128, 128)
+    assert not tiling.tile_fits(tiling.scale_tile(tile, 10.0, 64), 1000, 1000)
+
+
+def test_write_tile_embeds_metadata_in_png_and_jpeg(tmp_path):
+    from PIL import Image
+
+    pixels = np.full((16, 16, 3), 100, dtype=np.uint8)
+    meta = {"omero_image_id": 5, "roi_id": 9, "mpp": 0.5}
+
+    tiling.write_tile(pixels, str(tmp_path / "t.png"), metadata=meta)
+    tiling.write_tile(pixels, str(tmp_path / "t.jpg"), metadata=meta, quality=90)
+
+    assert json.loads(Image.open(tmp_path / "t.png").text["lavlab"]) == meta
+    assert json.loads(Image.open(tmp_path / "t.jpg").getexif()[270]) == meta
+    # atomic: no temp files left behind
+    assert sorted(os.listdir(tmp_path)) == ["t.jpg", "t.png"]
+
+
+def test_write_tile_quality_changes_jpeg_size(tmp_path):
+    rng = np.random.default_rng(0)
+    pixels = rng.integers(0, 255, (64, 64, 3), dtype=np.uint8)
+
+    tiling.write_tile(pixels, str(tmp_path / "lo.jpg"), quality=20)
+    tiling.write_tile(pixels, str(tmp_path / "hi.jpg"), quality=95)
+
+    assert (tmp_path / "lo.jpg").stat().st_size < (tmp_path / "hi.jpg").stat().st_size
+
+
+def _manifest_rows(n, image_id=1, prefix="N101/N101_S08_HE/G3/t"):
+    rows = []
+    for i in range(n):
+        row = dict.fromkeys(tiling.MANIFEST_COLUMNS, "")
+        row.update(tile_path=f"{prefix}{i}.png", omero_image_id=image_id, label="G3")
+        rows.append(row)
+    return rows
+
+
+def test_append_manifest_accumulates_without_duplicates(tmp_path):
+    out = tmp_path / "tiles"
+    manifest = tmp_path / "index" / "dataset.csv"
+
+    assert tiling.append_manifest(str(manifest), _manifest_rows(3), str(out)) == 3
+    # a repeated / resumed run adds nothing new
+    assert tiling.append_manifest(str(manifest), _manifest_rows(3), str(out)) == 0
+    # a second command adds its own rows
+    assert (
+        tiling.append_manifest(
+            str(manifest), _manifest_rows(2, 2, "X/Y/G5/u"), str(out)
+        )
+        == 2
+    )
+
+    rows = list(csv.DictReader(open(manifest)))
+    assert len(rows) == 5
+    # paths are rebased onto the manifest's own folder
+    assert rows[0]["tile_path"] == os.path.join(
+        "..", "tiles", "N101/N101_S08_HE/G3/t0.png"
+    )
+
+
+def test_append_manifest_refuses_a_file_with_other_columns(tmp_path):
+    manifest = tmp_path / "old.csv"
+    manifest.write_text("image_id,path\n1,a.png\n")
+
+    with pytest.raises(TilingError, match="different columns"):
+        tiling.append_manifest(str(manifest), _manifest_rows(1), str(tmp_path))
+
+
+@needs_omero
+def test_tile_slide_appends_to_the_combined_manifest(mocked_slide, tmp_path):
+    out = tmp_path / "out"
+    manifest = tmp_path / "dataset.csv"
+    params = _analysis_params()
+
+    tiling.tile_slide(None, _FakeImage(), params, str(out), manifest_path=str(manifest))
+    first = list(csv.DictReader(open(manifest)))
+    # a skipped (already finished) slide still lands in a fresh manifest
+    other = tmp_path / "other.csv"
+    tiling.tile_slide(
+        None,
+        _FakeImage(),
+        params,
+        str(out),
+        skip_existing=True,
+        manifest_path=str(other),
+    )
+
+    assert first
+    assert len(list(csv.DictReader(open(other)))) == len(first)
+    assert all((tmp_path / r["tile_path"]).is_file() for r in first)
+
+
+@needs_omero
+def test_skip_existing_resumes_an_interrupted_slide(mocked_slide, tmp_path):
+    out = tmp_path / "out"
+    params = _analysis_params()
+    first = tiling.tile_slide(None, _FakeImage(), params, str(out))
+    slide_dir = out / "N101" / "N101_S08_HE"
+
+    # simulate an interruption: no manifest yet, one tile never written
+    rows = tiling.read_manifest(str(slide_dir))
+    (slide_dir / tiling.MANIFEST_NAME).unlink()
+    (out / rows[0]["tile_path"]).unlink()
+    marker = out / rows[1]["tile_path"]
+    marker.write_bytes(b"kept")
+
+    result = tiling.tile_slide(None, _FakeImage(), params, str(out), skip_existing=True)
+
+    assert result.status == "done"
+    assert result.written == 1
+    assert result.reused == first.written - 1
+    assert marker.read_bytes() == b"kept"  # reused, not re-read
+    assert slide_is_complete(str(slide_dir))
+
+
+@needs_omero
+def test_an_interrupted_rerun_never_looks_finished(mocked_slide, tmp_path, monkeypatch):
+    """A crash mid-rewrite must not leave the old manifest beside new params."""
+    out = tmp_path / "out"
+    tiling.tile_slide(None, _FakeImage(), _analysis_params(), str(out))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(tiling, "write_tile", boom)
+    with pytest.raises(RuntimeError):
+        tiling.tile_slide(
+            None, _FakeImage(), _analysis_params(size=16), str(out), override=True
+        )
+
+    assert not slide_is_complete(str(out / "N101" / "N101_S08_HE"))
+
+
+# ---------------------------------------------------------------------------
+# CLI: the dataset flags
+# ---------------------------------------------------------------------------
+
+
+def test_scales_build_a_multi_scale_run_at_the_finest_mpp():
+    params = _build_params(_tile_args("--roi", "--all", "--scales", "1.0,0.5"))
+
+    assert params.mpp == 0.5
+    assert params.scales == [0.5, 1.0]
+
+
+def test_a_single_scale_is_just_mpp():
+    params = _build_params(_tile_args("--roi", "--all", "--scales", "0.25"))
+
+    assert params.mpp == 0.25
+    assert params.scales is None
+
+
+def test_scales_reject_nonsense():
+    with pytest.raises(SystemExit):
+        _tile_args("--whole", "--scales", "0.5,abc")
+    with pytest.raises(SystemExit):
+        _tile_args("--whole", "--scales", "0.5,0.5")
+    with pytest.raises(SystemExit):
+        _tile_args("--whole", "--scales", "0.5", "--mpp", "0.5")
+
+
+def test_erode_defaults_to_auto_and_accepts_micrometres_or_zero():
+    assert _build_params(_tile_args("--roi", "--all")).erode_um is None
+    assert (
+        _build_params(_tile_args("--roi", "--all", "--erode", "auto")).erode_um is None
+    )
+    assert (
+        _build_params(_tile_args("--roi", "--all", "--erode", "128")).erode_um == 128.0
+    )
+    assert _build_params(_tile_args("--roi", "--all", "--erode", "0")).erode_um == 0.0
+    with pytest.raises(SystemExit):
+        _tile_args("--roi", "--all", "--erode", "-5")
+
+
+def test_erode_is_rejected_in_whole_mode():
+    with pytest.raises(SystemExit, match="only applies to --roi"):
+        _validate_args(_tile_args("--whole", "--erode", "100"))
+
+
+def test_stride_is_the_other_way_to_say_overlap():
+    params = _build_params(_tile_args("--whole", "--size", "512", "--stride", "256"))
+
+    assert params.overlap == 256
+    with pytest.raises(SystemExit, match="--stride"):
+        _validate_args(_tile_args("--whole", "--size", "64", "--stride", "65"))
+    with pytest.raises(SystemExit):
+        _tile_args("--whole", "--stride", "10", "--overlap", "2")
+
+
+def test_jpeg_format_and_quality():
+    params = _build_params(_tile_args("--whole", "--format", "jpeg"))
+    assert params.fmt == "jpg"
+    assert params.quality == 90
+
+    params = _build_params(_tile_args("--whole", "--format", "jpg", "--quality", "80"))
+    assert params.quality == 80
+
+    assert _build_params(_tile_args("--whole")).quality is None
+    with pytest.raises(SystemExit, match="--quality only applies"):
+        _validate_args(_tile_args("--whole", "--quality", "80"))
+    with pytest.raises(SystemExit, match="1-100"):
+        _validate_args(_tile_args("--whole", "--format", "jpg", "--quality", "0"))
+
+
+def test_tissue_threshold_is_an_alias():
+    args = _tile_args("--whole", "--tissue-threshold", "0.25")
+
+    assert _build_params(args).tissue_thresh == 0.25
+
+
+def test_dry_run_manifest_and_connections_parse():
+    args = _tile_args(
+        "--roi", "--all", "--dry-run", "--manifest", "d.csv", "--connections", "8"
+    )
+    _validate_args(args)
+
+    assert args.dry_run and args.manifest == "d.csv" and args.connections == 8
+    with pytest.raises(SystemExit, match="--connections"):
+        _validate_args(_tile_args("--whole", "--connections", "0"))
+
+
+def test_batch_summary_reports_rois_lost_to_erosion(caplog):
+    from collections import Counter
+
+    results = [
+        tiling.SlideResult(
+            1,
+            "done",
+            tier="local",
+            label_counts=Counter(G3=5),
+            roi_total=3,
+            roi_counts=Counter({("G3", 1): 5, ("G5", 2): 0, ("G5", 3): 0}),
+            lost_rois=[("G5", 2)],
+            dry_run=True,
+            available=Counter(G3=9),
+        )
+    ]
+
+    with caplog.at_level("INFO"):
+        _summarise_batch([1], results)
+
+    messages = _messages(caplog)
+    assert "Dry run: nothing was written." in messages
+    assert "Available before caps: G3=9" in messages
+    assert (
+        "ROIs: 3 selected, 2 gave no tiles, 1 too small for a tile after --erode "
+        "(G5=1)" in messages
+    )
+
+
+@needs_omero
+def test_scales_cut_real_pixels_from_the_right_pyramid_levels(monkeypatch, tmp_path):
+    """End to end over a real two-level pyramid: no fake reader, real files."""
+    import pyvips as pv
+
+    import lavlab.roi as roi_module
+
+    base = _synthetic_slide(256)
+    source = tmp_path / "slide.tiff"
+    _write_pyramid(source, base)
+    size = 16
+    analysis_ds = tiling.analysis_downsample(size)  # 16 px tiles at 1 um/px -> 1/2
+    # glass all round, stained tissue in the middle (a uniform image has no
+    # contrast, so the tissue detector would rightly find nothing)
+    thumb = np.full((256 // analysis_ds, 256 // analysis_ds, 3), 250, np.uint8)
+    thumb[8:-8, 8:-8] = (180, 60, 160)
+
+    monkeypatch.setattr(
+        tiling, "choose_tier", lambda c, i, force_local=False: ("local", str(source))
+    )
+    monkeypatch.setattr(tiling, "_load_thumbnail_local", lambda p, d: thumb)
+    # one G3 ROI covering level-0 [32, 224), given at analysis scale
+    ring = _square_ring(
+        32 // analysis_ds, 32 // analysis_ds, 224 // analysis_ds, 224 // analysis_ds
+    )
+    monkeypatch.setattr(
+        roi_module, "get_shapes_as_points", lambda image, **kw: [_shape(7, ring, "g3")]
+    )
+    monkeypatch.setattr(roi_module, "shape_roi_ids", lambda image: {7: 70})
+
+    out = tmp_path / "out"
+    params = _analysis_params(
+        scales=[1.0, 2.0], size=size, background_label=None, max_tiles_per_label=6
+    )
+    result = tiling.tile_slide(None, _FakeImage(size=256), params, str(out))
+
+    rows = tiling.read_manifest(str(out / "N101" / "N101_S08_HE"))
+    assert result.written == len(rows) == 12  # 6 centres x 2 scales
+    level1 = base[::2, ::2]
+    for row in rows:
+        tile = pv.Image.new_from_file(str(out / row["tile_path"])).numpy()
+        x0, y0, w0 = int(row["x0"]), int(row["y0"]), int(row["w0"])
+        if row["mpp"] == "1.0":
+            assert row["level"] == "0"
+            expected = base[y0 : y0 + size, x0 : x0 + size]
+        else:
+            assert row["level"] == "1" and w0 == 2 * size
+            expected = level1[y0 // 2 : y0 // 2 + size, x0 // 2 : x0 // 2 + size]
+        assert np.array_equal(tile[:, :, :3], expected)
+        assert row["roi_id"] == "70"
+
+
+# --- making --erode visible ------------------------------------------------
+
+
+def test_erode_zero_warns_about_label_noise(caplog):
+    from lavlab.commands.tile import _explain_erosion
+
+    with caplog.at_level("INFO"):
+        _explain_erosion(_build_params(_tile_args("--roi", "--all", "--erode", "0")))
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "label noise" in warnings[0].getMessage()
+
+
+def test_default_erosion_says_nothing_for_a_single_scale(caplog):
+    from lavlab.commands.tile import _explain_erosion
+
+    with caplog.at_level("INFO"):
+        _explain_erosion(_build_params(_tile_args("--roi", "--all")))
+        _explain_erosion(_build_params(_tile_args("--whole")))
+
+    assert caplog.records == []
+
+
+def test_scales_explain_the_inset_and_how_to_keep_every_scale_inside(caplog):
+    from lavlab.commands.tile import _explain_erosion
+
+    args = _tile_args("--roi", "--all", "--size", "512", "--scales", "0.5,1.0")
+    with caplog.at_level("INFO"):
+        _explain_erosion(_build_params(args))
+
+    message = caplog.records[0].getMessage()
+    assert "kept 128 um inside" in message
+    assert "reach 256 um" in message
+    assert "pass --erode 256" in message
+
+
+@needs_omero
+def test_the_applied_erosion_is_reported_in_micrometres(mocked_slide, tmp_path):
+    out = tmp_path / "out"
+
+    # 8 px tiles at 1 um/px: the default inset is half a tile, 4 um
+    auto = tiling.tile_slide(
+        None, _FakeImage(), _analysis_params(), str(out), dry_run=True
+    )
+    off = tiling.tile_slide(
+        None, _FakeImage(), _analysis_params(erode_um=0.0), str(out), dry_run=True
+    )
+    done = tiling.tile_slide(None, _FakeImage(), _analysis_params(), str(out))
+
+    assert auto.erode_um == 4.0
+    assert off.erode_um == 0.0
+    saved = read_tile_params(done.slide_dir)
+    assert saved["erode_um_effective"] == 4.0
