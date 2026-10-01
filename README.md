@@ -471,7 +471,13 @@ its own, warned about once per slide.
 
 Batch mode matches `lr batch`/`roi batch`: per-slide failures warn and
 continue, and the run ends with per-tier, per-label, ROI/erosion and
-done/skipped/unannotated/failed totals, with the image IDs for each.
+done/skipped/unannotated/failed totals, with the image IDs for each. Any
+error on one slide -- including one nobody anticipated -- marks that slide
+failed and the batch carries on; only a slide whose *connection* dropped is
+retried, after logging in again. Workers stagger their first login, and if
+OMERO's session service starts refusing logins (an Ice
+`ProtocolException`), retries back off longer and at random intervals
+instead of hammering it.
 
 ### `lavlab meta roi textvalue` -- backfill ROI comments from stroke color
 
@@ -734,5 +740,10 @@ ever leave your machine.
   see the `try`/`except RuntimeError` in `src/lavlab/seg.py`) -- it only
   matters if you're trying to open the file with some *other* tool that
   goes through SimpleITK.
+- **`Image N: OMERO could not read this image's pixels`** (an
+  `omero.ResourceError`, "Error instantiating pixel buffer"). The image's
+  file is missing or corrupt on the OMERO server -- nothing on your side
+  will fix it, so `lavlab` skips that image, lists it under the failed IDs
+  and carries on. Send the IDs to whoever runs the OMERO server.
 - **`pip install -e ".[dev]"` fails on `omero-py`.** You need the Ice
   wheel installed first -- see the Install section above.

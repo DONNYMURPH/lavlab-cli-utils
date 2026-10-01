@@ -415,6 +415,21 @@ per-slide one: a run that "succeeded" on every slide while producing no
 exits non-zero only if *every* image failed; per-image errors are logged
 and the run continues.
 
+**Failure handling.** Each image is its own pool task, and the worker
+function never raises: any exception becomes a `failed` slide with a
+`WARNING` naming the image ID, and the parent independently counts an image
+as failed if its result cannot be collected. Only connection failures are
+retried (up to 3 attempts per slide), and only after closing the old
+session and logging in again. What counts as a connection failure is
+decided by exception type (`lavlab.omero_client.is_conn_error`), never by
+message text: `omero.SessionException` and Ice transport errors do;
+`omero.ResourceError` (corrupt or missing pixel buffer), any other
+`omero.ServerError` and `Ice.UnknownException` don't. Workers stagger their
+first login by up to 5 s, a failed start-up login is retried on the
+worker's first slide (a raising pool initializer would respawn forever),
+and a login refused with an Ice `ProtocolException` -- the session service
+pushing back -- backs off over a jittered window of up to 60 s.
+
 ### `lavlab meta roi textvalue <text_mapping> [image_ids...]`
 
 ```

@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import logging
 import multiprocessing
+import random
+import time
 from collections import Counter
 
 from lavlab.commands._shared import (
@@ -709,6 +711,16 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
             result = _tile_one(conn, image, args, params)
         except TilingError as exc:
             raise SystemExit(f"error: image {image_id}: {exc}") from None
+        except Exception as exc:
+            from lavlab.omero_client import describe_error, is_resource_error
+
+            if not is_resource_error(exc):
+                raise
+            raise SystemExit(
+                f"error: image {image_id}: OMERO could not read this image's pixels "
+                "-- its file is likely missing or corrupt on the server. "
+                f"({describe_error(exc)})"
+            ) from None
 
         if result.status == "skipped":
             print(f"Image {image_id}: skipped ({result.reason}).")
@@ -740,30 +752,96 @@ def _run_single(args: argparse.Namespace, image_id: int) -> None:
 
 _WORKER_STATE: dict = {}
 
+# The most a worker waits before its first login, so N workers starting
+# together don't all hit the session service in the same instant.
+_MAX_STARTUP_STAGGER = 5.0
+
+
+def _close_quietly(conn) -> None:
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except Exception:
+        log.debug("closing a dead connection failed", exc_info=True)
+
 
 def _init_worker(args: argparse.Namespace, params) -> None:
+    """Pool initializer. Must never raise.
+
+    A ``multiprocessing.Pool`` whose initializer raises silently respawns the
+    worker, which runs the initializer again -- forever. With logins failing
+    that is a reconnect storm with no end, so a failed first login is logged
+    and left for the worker's first slide to retry.
+    """
     global _WORKER_STATE
-    _WORKER_STATE = {
-        "conn": connect_from_args(args),
-        "args": args,
-        "params": params,
-    }
+    _WORKER_STATE = {"conn": None, "args": args, "params": params}
+    time.sleep(random.uniform(0, min(_MAX_STARTUP_STAGGER, 0.5 * args.workers)))
+    try:
+        _WORKER_STATE["conn"] = connect_from_args(args)
+    except (Exception, SystemExit) as exc:
+        log.warning(
+            "Worker could not log in at start-up (%s); it will retry on its first "
+            "slide.",
+            exc,
+        )
+
+
+def _worker_conn(args: argparse.Namespace):
+    """This worker's connection, logging in again if it has none or lost it.
+
+    The old connection is closed first: an abandoned one keeps its server
+    session alive until it times out, and enough of those is exactly what
+    makes the session service start refusing logins.
+    """
+    conn = _WORKER_STATE.get("conn")
+    if conn is not None and conn.isConnected():
+        return conn
+    _close_quietly(conn)
+    _WORKER_STATE["conn"] = None
+    conn = connect_from_args(args)
+    _WORKER_STATE["conn"] = conn
+    return conn
 
 
 def _process_one(image_id: int):
-    from lavlab.omero_client import is_conn_error
+    """Tile one slide in a batch worker. Never raises.
+
+    Anything escaping a worker is re-raised by the pool in the parent and
+    ends the whole batch, so every failure -- expected or not -- becomes a
+    ``failed`` :class:`lavlab.tiling.SlideResult` here, and the batch moves
+    on to the next slide.
+    """
+    from lavlab.omero_client import describe_error
+    from lavlab.tiling import SlideResult
+
+    try:
+        return _tile_with_retries(image_id)
+    except (Exception, SystemExit) as exc:
+        reason = describe_error(exc)
+        log.warning(
+            "Image %d: failed (%s); continuing with the next slide.",
+            image_id,
+            reason,
+            exc_info=True,
+        )
+        return SlideResult(image_id, "failed", reason=reason)
+
+
+def _tile_with_retries(image_id: int):
+    """Tile one slide, reconnecting only for genuine connection failures."""
+    from lavlab.omero_client import describe_error, is_conn_error, is_resource_error
     from lavlab.tiling import SlideResult, TilingError
 
     args = _WORKER_STATE["args"]
     params = _WORKER_STATE["params"]
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
+        conn = None
         try:
-            conn = _WORKER_STATE["conn"]
-            if not conn.isConnected():
-                conn = connect_from_args(args)
-                _WORKER_STATE["conn"] = conn
-
+            # Inside the try: a login that fails here is handled below like
+            # any other error, instead of escaping the worker.
+            conn = _worker_conn(args)
             image = conn.getObject("Image", image_id)
             if image is None:
                 log.warning("Image %d not found, skipping.", image_id)
@@ -774,12 +852,28 @@ def _process_one(image_id: int):
             log.warning("Image %d: %s", image_id, exc)
             return SlideResult(image_id, "failed", reason=str(exc))
         except Exception as exc:
+            if is_resource_error(exc):
+                reason = describe_error(exc)
+                log.warning(
+                    "Image %d: OMERO could not read this image's pixels -- its file "
+                    "is likely missing or corrupt on the server. Skipping it; the "
+                    "connection is fine, so no reconnect. Server said: %s",
+                    image_id,
+                    reason,
+                )
+                return SlideResult(image_id, "failed", reason=reason)
             if is_conn_error(exc) and attempt < max_attempts:
-                log.warning("Image %d: connection error, retrying: %s", image_id, exc)
-                _WORKER_STATE["conn"] = connect_from_args(args)
+                log.warning(
+                    "Image %d: connection error, reconnecting (attempt %d/%d): %s",
+                    image_id,
+                    attempt,
+                    max_attempts,
+                    describe_error(exc),
+                )
+                _close_quietly(conn)
+                _WORKER_STATE["conn"] = None
                 continue
-            log.exception("Image %d: unhandled error.", image_id)
-            return SlideResult(image_id, "failed", reason=type(exc).__name__)
+            raise
     return SlideResult(image_id, "failed", reason="retries exhausted")
 
 
@@ -893,6 +987,28 @@ def _run_batch(args: argparse.Namespace) -> None:
             conn.close()
 
         log.info("Found %d images.", len(image_ids))
-        results = list(pool.imap_unordered(_process_one, image_ids))
+        # One task per image, collected per image: if a result still can't
+        # come back (say, it fails to unpickle), only that image is lost.
+        pending = [
+            (image_id, pool.apply_async(_process_one, (image_id,)))
+            for image_id in image_ids
+        ]
+        results = [_collect(image_id, task) for image_id, task in pending]
 
     _summarise_batch(image_ids, results)
+
+
+def _collect(image_id: int, task):
+    """Wait for one image's result; a failure counts that image as failed."""
+    from lavlab.tiling import SlideResult
+
+    try:
+        return task.get()
+    except Exception as exc:
+        log.warning(
+            "Image %d: worker failed (%s: %s); counting it as failed.",
+            image_id,
+            type(exc).__name__,
+            exc,
+        )
+        return SlideResult(image_id, "failed", reason=type(exc).__name__)
