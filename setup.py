@@ -10,7 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
-from pathlib import Pathwhat
+from pathlib import Path
 
 from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
